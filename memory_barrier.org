@@ -1,0 +1,111 @@
+#+TITLE: 内存栅栏
+* register & cache:
+#+BEGIN_HTML
+<pre>
+                 | <--------------内存-------------->  |
+	register -- CPU -- storebuffer -- cpucache -- memory
+									 [ 所 有 线 程 可 见]
+
+       +-----------------+
+       |    register     |
+       |-----------------+
+       |     cpu         |
+       + ---|--------|----+
+         + ---+    + ---+
+         |store   |load
+         |buffer  |buffer
+         |   |    |   |
+         |   |    |   |
+         |   |    |   |
+         +-|-+    +-|-+
+      +-------------------+
+      |   L1,L2,L3 Cache  |
+      |                   |
+      +-------------------+
+</pre>
+#+END_HTML
+
+  volatile:告诉编译器，这个变量不能优化到register，每次读写直接走内存
+
+#+begin_src c-n
+//有问题
+thread 1 
+{
+ a=1 //cache miss,a的赋值放到storebuffer而中，而b=2赋值成功
+ b=2
+}
+//没问题
+thread 1 
+{
+ a=1 
+ memroy_barrier();//保证storebuffer中的操作都完成
+ b=2
+}
+#+end_src
+
+* Reordering，分两种，compiler reordering 和 cpu reordering
+** 1. compiler reordering
+  Compiler Reordering能够提高程序的运行效率。但有时候 (尤其是针对Parallel Programming)，
+  我们并不想让Compiler将我们的程序进行Reordering。此时，就需要有一种机制，
+  能够告诉Compiler，不要进行Reordering，这个机制，就是Compiler Memory Barrier。
+  
+  
+  顾名思义，Complier Memory Barrier就是阻止Compiler进行Reordering的Barrier Instruction；
+	Compiler Memory Barrier Instructions:
+	GNU
+#+begin_src c -n 
+		asm volatile("" ::: "memory");
+		__asm__ __volatile__ ("" ::: "memory");
+#+end_src
+
+	Intel ECC Compiler
+
+#+begin_src c -n
+		__memory_barrier();
+#+end_src
+
+	Microsoft Visual C++
+#+begin_src c -n
+		_ReadWriteBarrier();
+#+end_src
+		
+	【注意】：
+	Compiler Memory Barrier只是一个通知的标识，告诉Compiler在看到此指令时，不要对此指令的上下部分做Reordering。
+	在编译后的汇编中，Compiler Memory Barrier消失，	CPU不能感知到Compiler Memory Barrier的存在，
+	这点与后面提到的CPU Memory Barrier有所不同；
+
+** 2. cpu memory reording
+	Memory Barrier:
+	 A memory barrier, is a type of barrier instruction which causes a central processing unit (CPU) or compiler 
+	 to enforce an ordering constraint on memory operations issued before and after the barrier instruction. 
+	 This typically means that certain operations are guaranteed to be performed before the barrier, and others after.
+	
+	顾名思义，Compiler Memory Barrier既然是用来告诉Compiler在编译阶段不要进行指令乱排，
+	那么CPU Memory Barrier就是用来告诉CPU，在执行阶段不要交互两条操作内存的指令的顺序；
+	注意：由于CPU在执行时，必须感知到CPU Memory Barrier的存在，因此CPU Memory Barrier是一条真正的指令，
+	存在于编译后的汇编代码中；
+	
+	
+	更为复杂的CPU Memory Barriers
+	Store Barrier (Read Barrier)
+	所有在Store Barrier前的Store操作，必须在Store Barrier指令前执行完毕；
+	而所有Store Barrier指令后的Store操作，必须在Store指令执行结束后才能开始；
+
+	Store Barrier只针对Store(Write)操作，对Load无任何影响；
+
+	Load Barrier (Write Barrier)
+	将Store Barrier的功能，全部换为针对Load操作即可；
+
+	- Full Barrier :: Load + Store Barrier，Full Barrier两边的任何操作，均不可交换顺序；
+
+	- Only CPU Memory Barrier :: asm volatile(“mfence”);
+
+	- CPU + Compiler Memory Barrier :: asm volatile(“mfence” ::: ”memory”);
+
+--【除了CPU本身提供的MemoryBarrier指令，Lock Instructions也能实现MemoryBarrier 】--
+ 因为：Reads or writes cannot be reordered with I/O instructions, locked instructions, or serializing instructions.
+
+ 既然read/write不能穿越locked instructions进行reordering，那么所有带有lock prefix的指令，都构成了一个天然的Full  Memory Barrier；
+
+
+

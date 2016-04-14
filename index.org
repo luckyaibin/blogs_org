@@ -1,0 +1,35 @@
+#+TITLE: 内容列表
+
+* 内存栅栏 [[file:memory_barrier.org][view it]]
+ 栅栏的存在是为了解决多线程乱序执行的问题:而乱序有两种 
+1. 编译器重排指令
+2. cpu为了效率，颠倒指令执行顺序
+
+* 无锁队列
+** lockfree
+   什么是lockfree
+
+[[file:img/number/0.png][hello]]
+[[file:img/number/1.png]]
+[[file:img/1.png]]
+[[img/1.png]]
+
+
+[[fn:tp1][注脚1]]
+[[fn:tp2][注脚2]]
+
+[[my-anchor][internallinkage]]
+[fn:tp1] hello
+[fn:tp2] world
+#+OPTIONS: <:active
+#+ICALENDAR_EXCLUDE_TAGS:
+hello org mode!
+
+
+
+
+
+
+<<my-anchor>>* hello
+
+
