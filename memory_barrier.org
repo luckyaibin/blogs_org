@@ -109,3 +109,15 @@ thread 1
 
 
 
+
+
+
+
+ 一个关于memory barrier的好文:  https://dirtysalt.info/memory-barrier.html
+
+
+
+[robin]根据我的理解
++ compiler memory barrier ::: 实际上告诉编译器，在barrier之后要刷新寄存器[除此之外，也防止编译器进行指令重排]
++ volatile ::: 是告诉编译器，不要把我放在寄存器，对我的读写都是直接操作内存
++ cpu memory barrier ::: 因为cpu有乱序写OOS(out of order store),所以两个线程看到的值可能不一样

@@ -5,9 +5,14 @@
 1. 编译器重排指令
 2. cpu为了效率，颠倒指令执行顺序
 
-* 无锁队列
+* 无锁队列 [[file:lockfreequeue.org][view it]]
 ** lockfree
-   什么是lockfree
+   1. 什么是lockfree,不是不需要同步，而是不用开销大的mutex等，仅仅使用 CAS 原子操作进行 *同步*
+   2. 可能的问题
+      - ABA问题
+      - memory barrier
+
+
 
 [[file:img/number/0.png][hello]]
 [[file:img/number/1.png]]
@@ -17,14 +22,13 @@
 
 [[fn:tp1][注脚1]]
 [[fn:tp2][注脚2]]
-
+20160414
 [[my-anchor][internallinkage]]
 [fn:tp1] hello
 [fn:tp2] world
 #+OPTIONS: <:active
 #+ICALENDAR_EXCLUDE_TAGS:
 hello org mode!
-
 
 
 

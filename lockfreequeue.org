@@ -15,6 +15,7 @@
 
 ** 我们的ringbuffer实现的lockfree queue会产生ABA问题吗？
    答案是:会
+   稍后解决ABA问题。
 #+BEGIN_SRC 
 
 1. thread1:
@@ -70,9 +71,10 @@ head 是第一个可写位置，tail 是第一个可读位置
 
 
 * memory barrier
-
+  *关于lockfree queue*我这个代码，暂时没想清楚到底 memory barrier 是否应该加，以及加在哪里
+  
 * ringbuffer
-
+  实际上是一个数组，通过对数组的下标index进行取模%操作来进行访问，当超过长度会回环到数组的开始，看起来是一个ring而已
 
 
 * 实现
