@@ -1,0 +1,214 @@
+#+TITLE 无锁队列
+
+* 什么是lockfree
+**  不是不需要同步，而是不用开销大的mutex semaphore等，仅仅使用 CAS 原子操作进行*同步*
+    因为使用mutex会导致操作系统进行线程context的切换，而CAS仅仅是个函数调用（当然也有开销，锁住总线）
+    
+* ABA问题
+** 什么事ABA问题
+  - 有一个线程共享变量v
+  - thread1中读到v的值为A，这时线程被抢占，thread2被执行
+  - thread2修改v的值为B，然后又改成A,这时thread2被抢占，thread1又执行
+  - thread1中的v值，还是A，thread1就认为v的值没有变化，继续执行
+  
+  ABA最容易发生在lockfree算法中，cas首当其冲，因为cas判断的是指针的地址，如果这个地址被重用，问题就很大了
+
+** 我们的ringbuffer实现的lockfree queue会产生ABA问题吗？
+   答案是:会
+#+BEGIN_SRC 
+
+1. thread1:
+    1 2 3 4 5 6 7 8
+        t     h
+              seq
+  在cas之前被thread2抢占
+
+2. thread2:
+    经过push和pop之后，head经过 7 8 9 10 11 12 13 14（每个都取模),又变回了6，读取指针经过4 5 6 变成7,此时又被thread1抢占
+    1 2 3 4 5 6 7 8
+              h t
+
+3. 以上h:head,t:tail
+    1 2 3 4 5 6 7 8
+                t
+                h
+4. 结果，就是	ok = CAS(&rb->head, seq, (seq + 1) % sz);判定成功，head被修改为了head+1
+   变成了逻辑上的空list   
+
+#+END_SRC
+
+#+BEGIN_SRC 
+/*
+head 是第一个可写位置，tail 是第一个可读位置
+       tail=1                        head=6
++-----+-----+-----+-----+-----+-----+-----+-----+
+|empty| A   |  B  |  C  |  D  |  E  |empty|empty|
++-----+-----+-----+-----+-----+-----+-----+-----+
+   0     1     2     3     4     5     6     7
+
+  如果不限制head和tail，那么当head == tail的时候，无法区分是满还是空
+  所以这里限制满的时候 (head + sz)%sz - 1 == tail，就是说满的时候
+  元素数量等于sz - 1;
+  而当(head + sz)%sz  == tail 表示空，最开始head=0，tail=0，也就表示空
+
+
+  下面显示了push和pop时候维护的4个有用的元素：
+  head表示当前可以write（push）的索引
+  tail表示当前可以read(pop)的索引
+
+  [front_door,head) 表示当前正在写入的indexes，读操作不能越过front_door( (tail + sz) % sz == front_door ) 
+  [back_foor,tail)  表示当前正在读取的indexes，写操作不能越b过back_door ( (head + sz + 1) % sz == back_door )
+  <---------------------- <-------------------------
+  |										          / \
+  |										           |
+  |										           |
+ \ /									           |
+  ... back_door --> tail ... front_door --> head ...
+*/
+   
+  #+end_src
+
+
+* memory barrier
+
+* ringbuffer
+
+
+
+* 实现
+** CAS代码（win）
+   为什么要自己写CAS呢？Windows下的InterLockedCompareExchange不能知道是否更新成功（它只返回了更新之前的旧值），包装一下方便使用
+#+begin_src c -n
+//注意，这个错误的cas导致了无锁队列的bug
+inline unsigned int CAS_wrong(unsigned int * reg, unsigned int oldval, unsigned int newval)
+{
+	unsigned int old_v = *reg;
+	InterlockedCompareExchange(reg, newval, oldval);
+	return old_v != *reg;
+}
+
+inline unsigned int CAS(volatile unsigned int * reg, unsigned int oldval, unsigned int newval)
+{
+	unsigned int old_v = InterlockedCompareExchange(reg, newval, oldval);
+	return old_v == oldval;
+}
+#+end_src
+
+** lockfree queue 代码
+   - ringbuffer 和 lockfree queue定义
+#+begin_src c -n
+      #define RINGBUFFERSZ 8
+struct ringbuffer
+{
+	volatile unsigned int head;//write index
+	volatile unsigned int tail;//read index
+
+	volatile unsigned int front_door;
+	volatile unsigned int back_door;
+	unsigned int sz;
+	unsigned int *buf;
+};
+
+ringbuffer * create_ringbuffer(unsigned int bfsz)
+{
+	ringbuffer *rb = (ringbuffer*)malloc(sizeof(ringbuffer));
+	memset(rb, 0, sizeof(*rb));
+	rb->head = 0;
+	rb->tail = 0; 
+	rb->front_door = 0;//最后一个真正可以pop的
+	rb->back_door =0;//从它之后pop
+	rb->sz = bfsz;
+	rb->buf = (unsigned int *)malloc(sizeof(unsigned int)* bfsz);
+	memset(rb->buf, 0, sizeof(unsigned int)* bfsz);
+
+	return rb;
+}
+#+end_src 
+
+   - push操作
+#+begin_src c -n
+int push(ringbuffer* rb, int data)
+{
+	unsigned int seq;
+	unsigned int back_door;
+	unsigned int sz = rb->sz;
+	int ok = 0;
+	unsigned int try_cnt = 0;
+	//分配唯一可以写入的索引
+	do 
+	{
+		try_cnt++;
+		if (try_cnt > 5)
+		{
+			sleep(0);//让给其他线程去执行
+		}
+		seq = rb->head;
+		back_door = rb->back_door;
+		if ((seq + sz + 1) % sz == back_door)//check full,写入不能覆盖未读取的数据
+			return -1;
+        //潜在ABA问题所在？此时&rb->head被其他线程修改成其他值，然后又修改为和seq相等的值？
+		//会出现这个问题
+		ok = CAS(&rb->head, seq, (seq + 1) % sz);
+	} while (!ok);
+	
+	rb->buf[seq] = data;
+
+	//commit，如果线程T1分配到的序号等于front_door,那么向前移动front_door，否则说明有其他线程T2(或者还有T3..)同时在push，需要while等到T
+	//向前移动front_door之后才能向前移动front_door
+	try_cnt = 0;
+	while (!CAS(&rb->front_door, seq, (seq + 1)%sz))
+	{
+		try_cnt++;
+		if (try_cnt > 5)
+		{
+			sleep(0);//让给其他线程去执行
+		}
+	}
+	return 0;
+}
+#+end_src 
+   - pop操作
+#+begin_src c -n
+int pop(ringbuffer* rb)
+{
+	unsigned int head;
+	unsigned int seq;
+	unsigned int front_door;
+	unsigned int sz = rb->sz;
+	int ok = 0;
+	unsigned int try_cnt = 0;
+	//分配唯一可以读取的索引
+	do 
+	{
+		try_cnt++;
+		if (try_cnt > 5)
+		{
+			sleep(0);//让给其他线程去执行
+		}
+		head = rb->head;
+		seq = rb->tail;
+		front_door = rb->front_door;
+		if ((seq + sz) % sz == front_door)//check empty，不能读取未写入完成的数据
+		{
+			return -1;
+		}
+		ok = CAS(&rb->tail, seq, (seq + 1) % sz);
+	} while (!ok);
+
+	int data = rb->buf[seq];
+
+	//commit，原理和push的类似
+	try_cnt = 0;
+	while (!CAS(&rb->back_door,  seq  , (seq+1) % sz))
+	{
+		try_cnt++;
+		if (try_cnt > 5)
+		{
+			sleep(0);//让给其他线程去执行
+		}
+	}
+	return data;
+}
+#+end_src 
+
+* cache treshing（内存颠簸）
