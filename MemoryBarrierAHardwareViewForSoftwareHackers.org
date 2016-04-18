@@ -1,0 +1,202 @@
+#+TITLE Memory Barriers: a Hardware View for Software Hackers
+
+是什么促使cpu设计者去把memory barrier强加给可怜的SMP软件设计者？
+  因为reordering memory有更好的效率
+* summary
+1. Cache 的结构
+2. 介绍缓存同步协议如何确保cpu对每个内存地址上的值协商统一
+3. 展示了store buffers和invalidate queues 如何帮助caches和cache-cohenrency protocols 达到高效率
+
+
+* 1. Cache structure
+
+ #+BEGIN_SRC
+    +---------+     +----------+
+    |  cpu0   |     |   cpu1   |
+    +---+-----+     +-----+----+
+    +---+-----+     +-----+----+
+    |  Cache  |     |  Cache   |
+    +---+-----+     +------+---+
+        |                  |
+        +--interconnect----+
+           +------+------+
+           |   memory    |
+           +-------------+
+ #+END_SRC
+
+  数据在cpu缓存和内存间以固定长度流动，叫做缓存行（cache lines) ,通常是2的指数幂，
+从16 到 256 bytes。
+
+比如下图，每个盒子对应一个cache条目，包含了256-byte cache line。条目可能为空，用空盒子表示。
+其他的用缓存的资质表示。因为cache lines 必须256-byte 对齐，所以每个地址的低8bits是0.硬件hash表用接下来的高4位来匹配行号
+#+BEGIN_SRC
+                     way0        way1
+                   +----------+----------+.
+            0x0    |0x12345000|          |
+                   +----------+----------+
+            0x1    |0x12345100|          |
+                   +----------+----------+
+            0x2    |0x12345200|          |
+                   +----------+----------+
+                         。。。。。。
+                   +----------+----------+
+                   |          |          |
+                   +----------+----------+
+                   |          |          |
+                   +----------+----------+
+            0xe    |0x12345E00|0x43210E00|
+                   +----------+----------+
+            0xf    |          |          |
+                   +----------+----------+
+#+END_SRC
+
+0x43210E00 意味里面存放的是0x43210E00 - 0x43210EFF的256bytes缓存
+如果程序接下来要访问0x12345f00，这个地址hash到0xf，并且两个ways都是空，所以对应的256bytes line可以被放置
+如果程序接下来要访问0x1233000，hash到0x0,对应的256bytes可以放到way1
+如果程序接下来要访问0x1233E00,那么某个lines必须被eject以放新的cache line。如果被弹出的行接下来又被访问，一个cache miss将产生，被称作“associativity miss"
+
+  至今，我们仅仅考虑的一个cpu读取一个数据条目（data item）。如果它写操作会发生什么？
+  因为所有cpu对给定的值达成一致很重要，它必须在给定cpu 写（write）之前，让它从其他cpu的缓存（cache）被移除（removed）或者"invalidated"。
+  一旦这种无效(invalidation)完成，cpu才可以安全的修改数据条目。如果数据条目在这个cpu cache里存在，但是是只读的，这个过程被一个"write miss" 终止（terminate）。
+  一旦一个给定的cpu已经从其他cpu cache里完成了一个给定的数据条目的invalidating，那个cpu就可以重复的读（或者写）那个数据条目了。
+
+  接下来，如果其他cpu试图访问同一个data item，将引起一个cache miss，这次因为第一个cpu 为了写它 invalidated 了这个条目。这种类型的cache miss 被称作“communication miss",
+因为他通常因为几个cpu用数据条目去通信（communicate)(比如，锁就是cpu之间用 mutual-exclusion算法来进行通信的数据条目)。
+
+
+* 2. Cache-coherence protocols
+
+
+  CCP 管理cache-line 状态，为了避免不一致或者数据的丢失。这些协议可能很复杂，有几十个状态，但是为了我们的目的我们仅仅关心 four-state MESI cahe-coherence protocol。
+
+
+** 2.1 MESI States
+  MESI 代表 "modified","exclusive","shared"，"invalid",修改，互斥，共享，无效。
+Cache在每个缓存行上除了那line的物理地址和数据之外，用这个协议维护了一个2bit的状态标签。
++  modified ::: 才被所属的cpu进行了修改并且对应的内存被保证不会出现在其他cpu的cache里。意味着
+  被当前cpu所拥有。因为当前cache持有仅有的最新数据的拷贝，那么这个cache最终负责写回内存或者把它交给
+  其他cache，并且再重用这个line去存放其他数据的时候也必须这样做。
++ exclusive ::: 和modified很类似，唯一不同的是它还没有被对应的cpu进行修改，这反过来意味着cache里的
+  数据拷贝是最新的（up to date）。然而，因为当前cpu随时可以存储这个cache line ，而不用询问其他cpu，
+  exclusive状态的cache line仍然可以被称作 被当前cpu所拥有。意味着，因为当前内存的数据是最新，这个cache
+  可能随时丢弃这个数据而不用写回内存或者把它交给其他cpu。
++ shared ::: cache line可能被至少一个其他cpu缓存进行了复制(replicated)，所以当前cpu不允许在不经过
+  询问其他cpu的情况下去写（store）这个cache line。和exclusive类似，内存数据是最新的，当前cache可以随时
+  丢弃数据而不用写回内存或者交给其他cpu去处理。意味着只读？
++ invalid ::: 空，没有数据。新数据进入cache时候，如果可能的话就设置成invalid状态。这个方法是被建议的，因为
+  其他几个状态可能引起昂贵的cache miss。
+
+
+  因为所有cpu必须对cache lines的数据维持一个统一的视图（view），cache-cohenrence protocol 提供了
+转移cache lines状态的消息
+
+
+** 2.2 MESI Protocol Messages
+
++ Read
++ Read Response
++ Invalidate
++ Invalidate Acknowledge
++ Read Invalidatte
++ Writeback
+
+** 2.3 MESI  state Diagram
+
+[[./img/blog_img/MESI_state_diagram.png]]
+ MESI Cache-cohenrency state diagram
+
+*** Transition (a):
+  A cache line is written back to
+memory, but the CPU retains it in its cache and
+further retains the right to modify it. This tran-
+sition requires a “writeback” message.
+*** Transition (b):
+  The CPU writes to the cache line
+that it already had exclusive access to.  This
+transition does not require any messages to be
+sent or received.
+*** Transition (c):
+  The CPU receives a “read invali-
+date” message for a cache line that it has mod-
+ified. The CPU must invalidate its local copy,
+then respond with both a “read response” and an
+“invalidate acknowledge” message, both sending
+the data to the requesting CPU and indicating
+that it no longer has a local copy.
+*** Transition (d):
+  The CPU does an atomic read-
+modify-write operation on a data item that was
+not present in its cache.  It transmits a “read
+invalidate”, receiving the data via a “read re-
+sponse”. The CPU can complete the transition
+once it has also received a full set of “invalidate
+acknowledge” responses.
+*** Transition (e):
+  The CPU does an atomic read-
+modify-write operation on a data item that was
+previously read-only in its cache. It must trans-
+mit “invalidate” messages, and must wait for a
+full set of “invalidate acknowledge” responses be-
+fore completing the transition.
+*** Transition (f):
+  Some other CPU reads the cache
+line, and it is supplied from this CPU’s cache,
+which retains a read-only copy, possibly also
+writing it back to memory.  This transition is
+initiated by the reception of a “read” message,
+and this CPU responds with a “read response”
+message containing the requested data.
+*** Transition (g):
+  Some other CPU reads a data item
+in this cache line, and it is supplied either from
+this CPU’s cache or from memory. In either case,
+this CPU retains a read-only copy. This tran-
+sition is initiated by the reception of a “read”
+message, and this CPU responds with a “read re-
+sponse” message containing the requested data.
+*** Transition (h):
+  This CPU realizes that it will soon
+need to write to some data item in this cache
+line, and thus transmits an “invalidate” message.
+The CPU cannot complete the transition until
+it receives a full set of “invalidate acknowledge”
+responses.  Alternatively, all other CPUs eject
+this cache line from their caches via “writeback”
+messages (presumably to make room for other
+cache lines), so that this CPU is the last CPU
+caching it.
+*** Transition (i):
+  Some other CPU does an atomic
+read-modify-write operation on a data item in a
+cache line held only in this CPU’s cache, so this
+CPU invalidates it from its cache. This transi-
+tion is initiated by the reception of a “read in-
+validate” message, and this CPU responds with both
+ a “read response” and an “invalidate acknowledge” message.
+
+*** Transition (j):
+  This CPU does a store to a data
+item in a cache line that was not in its cache,
+and thus transmits a “read invalidate” message.
+The CPU cannot complete the transition until it
+receives the “read response” and a full set of 
+“in-validate acknowledge” 
+messages. The cache line
+will presumably transition to “modified” state
+via transition (b) as soon as the actual store com-
+pletes.
+*** Transition (k):
+  This CPU loads a data item in
+a cache line that was not in its cache.  The
+CPU transmits a “read” message, and completes
+the transition upon receiving the corresponding
+“read response”.
+*** Transition (l):
+  Some other CPU does a store to a
+data item in this cache line, but holds this cache
+line in read-only state due to its being held in
+other CPUs’ caches (such as the current CPU’s
+cache). This transition is initiated by the recep-tion of
+ an “invalidate” message, and this CPU
+responds with an “invalidate acknowledge” message.
+

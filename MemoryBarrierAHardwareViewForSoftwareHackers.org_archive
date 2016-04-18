@@ -1,0 +1,76 @@
+#    -*- mode: org -*-
+
+
+Archived entries from file c:/softwares/emacs-24.5-bin-i686-mingw32/emacs_directory/org/notes/MemoryBarrierAHardwareViewForSoftwareHackers.org
+
+
+* Cache structure
+  :PROPERTIES:
+  :ARCHIVE_TIME: 2016-04-18 Mon 09:59
+  :ARCHIVE_FILE: c:/softwares/emacs-24.5-bin-i686-mingw32/emacs_directory/org/notes/MemoryBarrierAHardwareViewForSoftwareHackers.org
+  :ARCHIVE_CATEGORY: MemoryBarrierAHardwareViewForSoftwareHackers
+  :END:
+ 
+ #+BEGIN_SRC 
+ 
+
+   +---------+     +----------+
+    |         |     |          |
+    +---+-----+     +-----+----+
+    +---+-----+     +-----+----+
+    |         |     |          |
+    +---+-----+     +------+---+
+        |                  |
+        +---------+--------+
+           +------+------+
+           |             |
+           +-------------+
+ #+END_SRC
+
+* Cache structure
+  :PROPERTIES:
+  :ARCHIVE_TIME: 2016-04-18 Mon 11:16
+  :ARCHIVE_FILE: c:/softwares/emacs-24.5-bin-i686-mingw32/emacs_directory/org/notes/MemoryBarrierAHardwareViewForSoftwareHackers.org
+  :ARCHIVE_CATEGORY: MemoryBarrierAHardwareViewForSoftwareHackers
+  :END:
+
+ #+BEGIN_VERSE
+    +---------+     +----------+
+    |  cpu0   |     |   cpu1   |
+    +---+-----+     +-----+----+
+    +---+-----+     +-----+----+
+    |  Cache  |     |  Cache   |
+    +---+-----+     +------+---+
+        |                  |
+        +--interconnect----+
+           +------+------+
+           |   memory    |
+           +-------------+
+ #+END_VERSE
+
+  数据在cpu缓存和内存间以固定长度流动，叫做缓存行（cache lines) ,通常是2的指数幂，
+从16 到 256 bytes。
+
+比如下图，每个盒子对应一个cache条目，包含了256-byte cache line。条目可能为空，用空盒子表示。
+其他的用缓存的资质表示。因为cache lines 必须256-byte 对齐，所以每个地址的低8bits是0.硬件hash表用这8bits的高4位来匹配行号
+#+BEGIN_SRC 
+                     way0        way1
+                   +----------+----------+.
+            0x0    |0x12345000|          |
+                   +----------+----------+
+            0x1    |          |          |
+                   +----------+----------+
+                   |          |          |
+                   +----------+----------+
+                         。。。。。。
+                   +----------+----------+
+                   |          |          |
+                   +----------+----------+
+                   |          |          |
+                   +----------+----------+
+                   |          |          |
+                   +----------+----------+
+                   |0x12345E00|0x43210E00|
+                   +----------+----------+
+#+END_SRC
+
