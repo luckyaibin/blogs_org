@@ -200,3 +200,24 @@ cache). This transition is initiated by the recep-tion of
  an “invalidate” message, and this CPU
 responds with an “invalidate acknowledge” message.
 
+
+
+
+** 2.4 MESI Protocol Example
+  
+* 3 不必要的延迟情况下存储结果
+  如果cpu0想要写（write）一个在cpu0 的 cache 里的某个cache line，cpu0在能够写之前要等待缓存行到达cache0(cpu0 invalidate 给cpu1，cpu1 发送acknowledgement给cpu0,)。
+  
+** 3.1 Store Buffers
+  为了速度，在cpu 和 cache 之间增加了storebuffer。cpu0 能够简单的把写操作存在storebuffer里，然后继续执行。等到最终cache line从cpu1 到达 cpu0 的时候，数据就从store buffer写到cpu0的cache line。
+
+
+** 3.2 Store Forwarding
+  变量a b都初始化为0，并且cpu1的缓存行包含a，cpu0缓存行包含b。
+#+BEGIN_SRC 
+  a = 1;     //cpu1
+  b = a + 1; //cpu0
+  assert(b==2);
+#+END_SRC
+
+  
