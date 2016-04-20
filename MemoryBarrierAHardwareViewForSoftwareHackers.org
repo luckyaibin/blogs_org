@@ -289,7 +289,7 @@ void bar(void)
 那么接下来的操作可能如下:
 
 #+BEGIN_SRC 
-  cpu 0(cache 包含 b)             cpu 1(cache 包含 a)
+      cpu 0(cache 包含 b)                    cpu 1(cache 包含 a)
 +-------------------------------------+------------------------------+
 | 执行 a=1,缓存行不在cpu0的cache,       |                              |
 | 所以把a的新值放到store buffer，然后发  |                              |
@@ -314,13 +314,13 @@ void bar(void)
 |                                     | 现在可以结束执行while(b==0) continue |
 |                                     | 因为它发现b的值是1，它准备执行下一个语句 |
 +-------------------------------------+--------------------------------+
-|                                     |** 执行assert(a==1),因为他正在使用 | < ---根本原因在于其他cpu对存在于本cpu cache的store操作，放到了的store buffer，而并没有对当前cpu感知到，仍然使用了本地cache的旧值！
-|                                     |a的旧值，这个断言失败了             |
+|                                     |** 执行assert(a==1),因为他正在使用 | < ---根本原因在于其他cpu对存在于本cpu cache的store操作，
+|                                     |a的旧值，这个断言失败了             |   放到了的store buffer，发出的read invalidate 消息没有及时送达，因此修改并没有对当前cpu感知到，仍然使用了本地cache的旧值！
 +-------------------------------------+---------------------------------+
 |                                     | ** 收到 read invalidate 消息,    |
 |                                     | 然后把包含a的缓存行传输给cpu 0,并且 |
-|                                     | 把本地包含a的cache line , 清空    | 
-|                                     |(invalidate)掉但是这已经太晚了     |                                    
+|                                     | 把本地包含a的cache line  清空     | 
+|                                     |(invalidate)掉,但是这已经太晚了    |                                    
 +-------------------------------------+---------------------------------+
 | 收到包含a的缓存行然后应用到缓存的       |                                 |
 | store操作上,刚好赶上cpu 1的失败断言    |                                 |
@@ -344,4 +344,121 @@ void bar(void)
 }
 #+END_SRC
 
-smp_bm()让cpu在应用接下来的store操作之前先flush它的store buffer。
+smp_bm()让cpu在应用接下来的store操作之前先flush它的store buffer。cpu可能在处理之前简单的等待直到store buffer为空,
+或者它可以使用store buffer持有接下来的store操作直到store buffer里所有之前的操作都被应用(applied).
+  用后面的方法,操作的序列可能如下:
+
+#+BEGIN_SRC 
+  cpu 0(cache 包含 b)             cpu 1(cache 包含 a)
++-------------------------------------+------------------------------+
+| 执行 a=1,缓存行不在cpu0的cache,       |                              |
+| 所以把a的新值放到store buffer，然后发  |                              |
+| 送"read invalidate"消息              |                              |
++-------------------------------------+------------------------------+
+|                                     | 执行 while(b==0) continue,但是|
+|                                     | 包含b的缓存行不在缓存，所以它发送|
+|                                     |一个 read message             |
++-------------------------------------+------------------------------+
+| 执行smp_mb(),标记(mark)所有当前       |                              |
+|store buffer里的条目                  |                              |
+|                                     |                              |
++-------------------------------------+------------------------------+
+| 执行b=1,因为已经有了b的缓存行          |                              |
+|  (换句话说，缓存行是 modified)        |                              |
+|或者 exclusive 状态),[**所以如果按照上一步 |                           |
+|没加memory barrier之前的操作的话,它将存 |                              |
+|储b的新值到缓存行，b=1**],但是在store   |                              |
+|buffer 里有 标记(marked)条目,因此它并不 |                              |
+|存储b的新值1到cache,而是把它也放到store |                              |
+|buffer(但是是未标记(unmarked) 条目)    |                              |
++-------------------------------------+------------------------------+
+| 收到 read 消息，并且传输包含b原始值的   |                              |
+| cache line 给cpu 1.同时标记它本地这   |                              |
+| 个cache line 的状态为 shared状态       |                              |
++-------------------------------------+------------------------------+
+|                                     | 收到包含b的缓存行并且存到它自己  |
+|                                     | 的cache                       |
++-------------------------------------+------------------------------+
+|                                     | 现在本可以结束执行while(b==0) continue |
+|                                     | 因为它发现b的值仍然是0,它重复while statement|
+|                                     |** b的新值被安全的隐藏在cpu 0的 store buffer里 |
++-------------------------------------+---------------------------------+
+|                                     | ** 收到 read invalidate 消息,    |
+|                                     | 然后把包含a的缓存行传输给cpu 0,并且 |
+|                                     | 把本地包含a的cache line 清空      | 
+|                                     |                                 |                                    
++-------------------------------------+---------------------------------+
+| 收到包含a的缓存行然后应用到缓存的store操|                                 |
+| 作上,把这行cache line 改成 modified   |                                 |
++------------------------------+----------------------------------------+
+|因为对a的store是store buffer里唯一被   |                                 |
+|smp_mb()标记的条目,cpu 0同时也能store  |                                 |
+|b 的新值(除非包含b的cache line现在     |                                 |
+|是shared状态)                         |                                 |
++-------------------------------------+---------------------------------+
+|cpu 0因此发送invalidate 消息给cpu1     |                                 |
++-------------------------------------+---------------------------------+
+|                                     |cpu 1收到invalidate 消息,把包含b的 |
+|                                     |cache line从cache清空(invalidate) |
+|                                     |然后发送"acknowledgement给cpu0    |
++-------------------------------------+---------------------------------+
+|                                     |执行while(b==0)continue,但是包含b的|
+|                                     |cacheline不在的cache里,因此它发送  |
+|                                     |read message 给cpu 0             |
++-------------------------------------+---------------------------------+
+|收到"acknowledgement"消息,并且把包含b的|                                 |
+|cache line改成"exclusive"状态.cpu 0 现|                                 |
+|在存储b的新值到cache line              |                                 |
++-------------------------------------+---------------------------------+
+|收到read 消息然后把包含b的新值的cache   |                                 |
+|line 传输给cpu 1.同时把本地缓存行的拷贝 |                                 |
+|设置为"shared"状态                    |                                 |
++-------------------------------------+---------------------------------+
+|                                     |收到包含b的缓存行并且存到它自己的cache|
++-------------------------------------+-----------------------------------+
+|                                     |现在可以结束执行while(b==0) continue |
+|                                     |并且发现b的值是1,它执行下一个statement|
++-------------------------------------+------------------------------------+
+|                                     |执行assert(a==1),但是包含a的cache     |
+|                                     |line不在它的cache里.一旦它从cpu 0获得  |
+|                                     |了这个cache,它将使用的是最新的a的值,因此|
+|                                     |断言通过                             |
++-------------------------------------+------------------------------------+
+#+END_SRC
+
+
+* 4 Store Sequences Result in Unnecessary Stalls
+
+** 4.1 Invalidate Queues
+
+** 4.2 Invalidate Queues and Invalidate Acknowledge
+
+** 4.3  Invalidate Queues and Memory Barriers
+
+  假设a 和 b初始化为0，
+a是只读（MESI "shared" 状态）,
+b被 cpu 0持有（MESI "exclusive" or "modified"),
+然后假设 cpu 0执行 foo(), cpu 1执行 bar():
+#+BEGIN_SRC 
+void foo(void)
+{
+ a=1;
+ smp_mb();
+ b=1;
+}
+void bar(void)
+{
+ while(b==0) continue;
+ assert(a==1);
+}
+#+END_SRC
+
+ to be coutinued...
+
+
+* 5. Read  and  Write  Memory Barriers
+  上一部分,memory barrier 用来标记 store buffer 和 invalidate queue.但实际上在我们的代码片段里,foo()和
+invalidate queue什么关系都没有,bar()类似的,和store buffer也没什么关系.
+  因此许多cpu架构提供了更弱一点的 memory barrier指令,仅和某个或两个都有关系.简单讲,"read memory barrier"仅仅标记了
+invalidate queue,"write memory barrier" 仅仅标记了store buffer.而 一个full-fledged memory barrier两个都标记.
+fledged
