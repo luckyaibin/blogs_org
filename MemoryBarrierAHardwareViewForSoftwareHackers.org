@@ -8,7 +8,9 @@
 3. 展示了store buffers和invalidate queues 如何帮助caches和cache-cohenrency protocols 达到高效率
 
 
-* 1. Cache structure
+* 1. 缓存结构(Cache structure)
+  
+  *仅仅有cache加快了读取,但是由于不同cpu之间的操作需要同步,所以效率很低*
 
  #+BEGIN_SRC
     +---------+     +----------+
@@ -24,11 +26,11 @@
            +-------------+
  #+END_SRC
 
-  数据在cpu缓存和内存间以固定长度流动，叫做缓存行（cache lines) ,通常是2的指数幂，
-从16 到 256 bytes。
+数据在cpu缓存和内存间以固定长度流动，叫做缓存行（cache lines) ,通常是2的指数幂，从16 到 256 bytes。
 
 比如下图，每个盒子对应一个cache条目，包含了256-byte cache line。条目可能为空，用空盒子表示。
-其他的用缓存的资质表示。因为cache lines 必须256-byte 对齐，所以每个地址的低8bits是0.硬件hash表用接下来的高4位来匹配行号
+其他的用缓存的地址表示。因为cache lines 必须256-byte 对齐，所以每个地址的低8 bits是0.硬件hash表用接下来的高4位来匹配行号
+
 #+BEGIN_SRC
                      way0        way1
                    +----------+----------+.
@@ -56,168 +58,162 @@
 如果程序接下来要访问0x1233E00,那么某个lines必须被eject以放新的cache line。如果被弹出的行接下来又被访问，一个cache miss将产生，被称作“associativity miss"
 
   至今，我们仅仅考虑的一个cpu读取一个数据条目（data item）。如果它写操作会发生什么？
+
   因为所有cpu对给定的值达成一致很重要，它必须在给定cpu 写（write）之前，让它从其他cpu的缓存（cache）被移除（removed）或者"invalidated"。
   一旦这种无效(invalidation)完成，cpu才可以安全的修改数据条目。如果数据条目在这个cpu cache里存在，但是是只读的，这个过程被一个"write miss" 终止（terminate）。
+
   一旦一个给定的cpu已经从其他cpu cache里完成了一个给定的数据条目的invalidating，那个cpu就可以重复的读（或者写）那个数据条目了。
 
   接下来，如果其他cpu试图访问同一个data item，将引起一个cache miss，这次因为第一个cpu 为了写它 invalidated 了这个条目。这种类型的cache miss 被称作“communication miss",
 因为他通常因为几个cpu用数据条目去通信（communicate)(比如，锁就是cpu之间用 mutual-exclusion算法来进行通信的数据条目)。
 
 
-* 2. Cache-coherence protocols
+* 2. 缓存一直协议(Cache-coherence protocols)
 
 
-  CCP 管理cache-line 状态，为了避免不一致或者数据的丢失。这些协议可能很复杂，有几十个状态，但是为了我们的目的我们仅仅关心 four-state MESI cahe-coherence protocol。
+  CPU 管理cache-line 状态，为了避免不一致或者数据的丢失。这些协议可能很复杂，有几十个状态，但是为了我们的目的我们仅仅关心 four-state MESI cahe-coherence protocol。
 
 
 ** 2.1 MESI States
+
   MESI 代表 "modified","exclusive","shared"，"invalid",修改，互斥，共享，无效。
 Cache在每个缓存行上除了那line的物理地址和数据之外，用这个协议维护了一个2bit的状态标签。
-+  modified ::: 才被所属的cpu进行了修改并且对应的内存被保证不会出现在其他cpu的cache里。意味着
+
++  modified :: 才被所属的cpu进行了修改并且对应的内存被保证不会出现在其他cpu的cache里。意味着
   被当前cpu所拥有。因为当前cache持有仅有的最新数据的拷贝，那么这个cache最终负责写回内存或者把它交给
   其他cache，并且再重用这个line去存放其他数据的时候也必须这样做。
-+ exclusive ::: 和modified很类似，唯一不同的是它还没有被对应的cpu进行修改，这反过来意味着cache里的
++ exclusive :: 和modified很类似，唯一不同的是它还没有被对应的cpu进行修改，这反过来意味着cache里的
   数据拷贝是最新的（up to date）。然而，因为当前cpu随时可以存储这个cache line ，而不用询问其他cpu，
   exclusive状态的cache line仍然可以被称作 被当前cpu所拥有。意味着，因为当前内存的数据是最新，这个cache
   可能随时丢弃这个数据而不用写回内存或者把它交给其他cpu。
-+ shared ::: cache line可能被至少一个其他cpu缓存进行了复制(replicated)，所以当前cpu不允许在不经过
++ shared :: cache line可能被至少一个其他cpu缓存进行了复制(replicated)，所以当前cpu不允许在不经过
   询问其他cpu的情况下去写（store）这个cache line。和exclusive类似，内存数据是最新的，当前cache可以随时
   丢弃数据而不用写回内存或者交给其他cpu去处理。意味着只读？
-+ invalid ::: 空，没有数据。新数据进入cache时候，如果可能的话就设置成invalid状态。这个方法是被建议的，因为
++ invalid :: 空，没有数据。新数据进入cache时候，如果可能的话就设置成invalid状态。这个方法是被建议的，因为
   其他几个状态可能引起昂贵的cache miss。
 
 
-  因为所有cpu必须对cache lines的数据维持一个统一的视图（view），cache-cohenrence protocol 提供了
-转移cache lines状态的消息
+  因为所有cpu必须对cache lines的数据维持一个统一的视图（view），cache-cohenrence protocol 提供了协调cache line在系统里面移动时的消息(messages).
 
 
 ** 2.2 MESI Protocol Messages
 
-+ Read
-+ Read Response
-+ Invalidate
-+ Invalidate Acknowledge
-+ Read Invalidatte
-+ Writeback
+上一部分讲到的转变(transitions) 要求cpu之间进行通信(communication).如果cpu们在一个共享总线上,
+下面的消息足够了:
++ Read :: 读消息包含了将要被读取的cache line的物理地址
 
-** 2.3 MESI  state Diagram
++ Read Response :: 读回复消息包含了之前读消息请求的数据.这个读消息可能是内存(memory)或者其他缓存
+(cache)中的某一个提供的(supplied).
+
++ Invalidate :: 无效消息包含了cache line的物理地址.所有其他cache必须从他们的缓存里移除掉对
+应的数据并且进行回应(respond).
+
++ Invalidate Acknowledge :: 一个cpu收到了一个无效(invalidate)消息在从它的缓存里删除了对应的数据后必须要用
+ 无效确认(invalidate acknowledge)消息进行回应.
+
++ Read Invalidatte :: 读-无效 消息包含了将要读取的cache line的物理地址,同时指示其他caches移除掉这个数据.因此
+它是一个 读(read) 和 无效(invalidate),正像他的名字表明的那样.一个 读-无效 信息要求 一个 读回复 (read response) 和 无效确认
+(invalidate acknowledge)消息作为回应.
+
++ Writeback :: 写回消息包含了将要被写回内存的地址和数据(并且同时也许被窥探(snooped)到其他的cpu的cache).这个消息允许cache弹出
+修改状态的行(line),以用来给其他数据腾出地方.
+
+** 2.3 MESI状态图( MESI  state Diagram)
+
+
+  一个给定的cache line的状态随着协议消息被发送和接收时而改变,如下图所示:
 
 [[./img/blog_img/MESI_state_diagram.png]]
  MESI Cache-cohenrency state diagram
 
 *** Transition (a):
-  A cache line is written back to
-memory, but the CPU retains it in its cache and
-further retains the right to modify it. This tran-
-sition requires a “writeback” message.
+ 一个cache line已经被写回内存了,但是cpu仍然持有它在它的cache里并且接下来将持有修改它的权限.这个转换需要一个写回(write back)消息.
+
 *** Transition (b):
-  The CPU writes to the cache line
-that it already had exclusive access to.  This
-transition does not require any messages to be
-sent or received.
+cpu写它已经互斥访问的cache line.这个转换不需要任何消息的发送和接收.
+
 *** Transition (c):
-  The CPU receives a “read invali-
-date” message for a cache line that it has mod-
-ified. The CPU must invalidate its local copy,
-then respond with both a “read response” and an
-“invalidate acknowledge” message, both sending
-the data to the requesting CPU and indicating
-that it no longer has a local copy.
+cpu收到一个它已经修改了的cache line的 读-无效 (read invalidate)消息.cpu必须把它本地拷贝(copy)无效掉,然后用 一个 读回复(read
+response) 和 一个 无效确认 (invalidate acknowledge)消息来回应,表明它已经没有本地拷贝了.
+
 *** Transition (d):
-  The CPU does an atomic read-
-modify-write operation on a data item that was
-not present in its cache.  It transmits a “read
-invalidate”, receiving the data via a “read re-
-sponse”. The CPU can complete the transition
-once it has also received a full set of “invalidate
-acknowledge” responses.
+cpu对一个不在它cache里的数据条目(data item)做了一个原子 读-修改-写 (atomic read-modify-write)操作.它发送一个 读-无效(read 
+invalidate) 消息,通过一个 读回复(read response)收到了数据.cpu一旦收到了所有的(a full set) 无效回复(invalidate acknowledge),
+它就完成了这个转换.
+
 *** Transition (e):
-  The CPU does an atomic read-
-modify-write operation on a data item that was
-previously read-only in its cache. It must trans-
-mit “invalidate” messages, and must wait for a
-full set of “invalidate acknowledge” responses be-
-fore completing the transition.
+cpu对一个之前在它cache里的只读(read-only)数据条目做一个原子 读-修改-写(atomic read-modify-write)操作.它必须发送无效
+(invalidate)消息,并且在完成转换之前必须等到所有的(a full set) 无效回复(invalidate acknowledge).
+
 *** Transition (f):
-  Some other CPU reads the cache
-line, and it is supplied from this CPU’s cache,
-which retains a read-only copy, possibly also
-writing it back to memory.  This transition is
-initiated by the reception of a “read” message,
-and this CPU responds with a “read response”
-message containing the requested data.
+某个其他cpu读(也可能写回内存)一个从这个cpu cache里提供的cache line的拷贝(copy).这个转换由一个 读(read)消息发起,然后这个cpu
+用一个包含请求数据的(requested data)读回复(read resposne)作为回复.
+
 *** Transition (g):
-  Some other CPU reads a data item
-in this cache line, and it is supplied either from
-this CPU’s cache or from memory. In either case,
-this CPU retains a read-only copy. This tran-
-sition is initiated by the reception of a “read”
-message, and this CPU responds with a “read re-
-sponse” message containing the requested data.
+某个其他cpu读这个cache line的数据条目,也许它是由这个cpu的cache或者内存提供的.无论那种情况,这个cpu包含的是一个只读拷贝(read-only copy).这个转换由一个 读(read)消息发起,然后这个cpu
+用一个包含请求数据的(requested data)读回复(read resposne)作为回复.
+
 *** Transition (h):
-  This CPU realizes that it will soon
-need to write to some data item in this cache
-line, and thus transmits an “invalidate” message.
-The CPU cannot complete the transition until
-it receives a full set of “invalidate acknowledge”
-responses.  Alternatively, all other CPUs eject
-this cache line from their caches via “writeback”
-messages (presumably to make room for other
-cache lines), so that this CPU is the last CPU
-caching it.
+这个cpu意识到它将很快需要写回一些这个cache里的一些数据条目,因此发送一个 无效 消息(invalidate message).
+这个cpu在收到所有(a full set)的 无效确认(invalidate acknowledge)消息之前不能完成这个转换.
+或者,所有其他cpu通过(via) 写回(writeback)消息 从他们的cache里弹出(eject)这个cache line( 很可能presumably为其他缓存行腾
+空间),这样,这个cpu是最后一个缓存(caching)它的cpu.
 *** Transition (i):
-  Some other CPU does an atomic
-read-modify-write operation on a data item in a
-cache line held only in this CPU’s cache, so this
-CPU invalidates it from its cache. This transi-
-tion is initiated by the reception of a “read in-
-validate” message, and this CPU responds with both
- a “read response” and an “invalidate acknowledge” message.
+某个其他cpu对一个仅(only)被当前cpu cache持有(held)的数据做了一个 原子 读-修改-写(atomic read-modify-write)操作,因此这个cpu需要
+把它从它的cache里无效掉(invalidate).这个转换由一个 读-无效(read invalidate)消息开始,然后这个cpu用一个读回复(read resposne)
+和一个 无效确认(invalidate acknowledge)作为回复.
 
 *** Transition (j):
-  This CPU does a store to a data
-item in a cache line that was not in its cache,
-and thus transmits a “read invalidate” message.
-The CPU cannot complete the transition until it
-receives the “read response” and a full set of 
-“in-validate acknowledge” 
-messages. The cache line
-will presumably transition to “modified” state
-via transition (b) as soon as the actual store com-
-pletes.
+这个cpu对不在它cache里的cache line的数据条目做了一个存储操作,因此发送一个 读-无效 (read invalidate)消息.
+这个cpu在收到 对应的读回复(read response) 和所有的 无效确认(invalidate acknowledge)消息时才能完成转换.
+只要实际写(store)一旦完成,缓存行强很可能( presumably )转换到 修改状态(modified state).
+
 *** Transition (k):
-  This CPU loads a data item in
-a cache line that was not in its cache.  The
-CPU transmits a “read” message, and completes
-the transition upon receiving the corresponding
-“read response”.
+这个cpu对不在它cache里的cache line的数据条目做了一个读操作(load).这个cpu发送一个读消息(read message),然后在收到对应的
+read response 后完成这个转换.
 *** Transition (l):
-  Some other CPU does a store to a
-data item in this cache line, but holds this cache
-line in read-only state due to its being held in
-other CPUs’ caches (such as the current CPU’s
-cache). This transition is initiated by the recep-tion of
- an “invalidate” message, and this CPU
-responds with an “invalidate acknowledge” message.
+某个其他cpu对一个存在于这个cache line的数据条目做了一个存储操作,(这个缓存是只读(read-only)因为它同时也被其他cpu cache 持有
+(held)).这个转换由一个 无效(invalidate)消息开始,然后这个cpu用一个读回复(read resposne)
+和一个 无效确认(invalidate acknowledge)作为回复.
 
 
 
+** 2.4 MESI 协议的例子(MESI Protocol Example)
 
-** 2.4 MESI Protocol Example
-  
+
+
 * 3 不必要的延迟情况下存储结果
+
   如果cpu0想要写（write）一个在cpu0 的 cache 里的某个cache line，
 cpu0在能够写之前要等待缓存行到达cache0(cpu0 invalidate 给cpu1，cpu1 发送acknowledgement给cpu0,)。
-  
-** 3.1 (存储缓冲--把写(store)指令放到缓冲里,cpu继续执行)Store Buffers
+
+** 3.1 Store Buffers(存储缓冲--把写(store)指令放到缓冲里,cpu继续执行)
   为了速度，在cpu 和 cache 之间增加了storebuffer
 。cpu0 能够简单的把写操作存在storebuffer里，然后继续执行。
 等到最终cache line从cpu1 到达 cpu0 的时候，数据就从store buffer写到cpu0的cache line。
 
+ #+BEGIN_SRC
+    +---------+     +----------+
+    |  cpu0   |     |   cpu1   |
+    +-+-+--+--+     +--+--+---++
+      |  +-+----------+ |    +-+----------+
+      |  |storebuffer | |    |storebuffer |
+      |  +-+---------+  |    +-+----------+
+    +---+--+--+     +--+--+---++
+    |  Cache  |     |  Cache   |
+    +---+-----+     +------+---+
+        |                  |
+        +--interconnect----+
+           +------+------+
+           |   memory    |
+           +-------------+
+ #+END_SRC
 
-** 3.2 Store缓冲的转发(Store Forwarding) 
+
+
+** 3.2 Store缓冲的转发(Store Forwarding)
   变量a b都初始化为0，并且cpu1的缓存行包含a，cpu0缓存行包含b。
-#+BEGIN_SRC 
+#+BEGIN_SRC
   a = 1;     //cpu1
   b = a + 1; //cpu0
   assert(b==2);
@@ -238,7 +234,7 @@ cpu0在能够写之前要等待缓存行到达cache0(cpu0 invalidate 给cpu1，c
 |纪录(record)到它的store buffer      |               |
 +----------------------------------+-------------------------------------+
 |                                  |收到 read invalidate消息，然后把       |
-|                                  |cache line转移，从自己缓存行移除a作为回应|                                                
+|                                  |cache line转移，从自己缓存行移除a作为回应|
 +----------------------------------+-------------------------------------+
 |执行b=a+1                          |               |
 +----------------------------------+---------------+
@@ -255,7 +251,7 @@ cpu0在能够写之前要等待缓存行到达cache0(cpu0 invalidate 给cpu1，c
 |执行assert(b==2),失败               |               |
 +-----------------------------------+---------------+
 
-#+END_SRC  
+#+END_SRC
 
 问题出现在我们又2份a的拷贝，一个在cache，一个在store buffer。
 这个例子破坏了一个重要的保证：每个cpu必须总是看到它的操作和程序的顺序一致。
@@ -274,7 +270,7 @@ cpu0在能够写之前要等待缓存行到达cache0(cpu0 invalidate 给cpu1，c
 
 为了看看着第二个复杂的，全局内存顺序的破坏(violation),考虑下面的代码，变量a和b都初始化为0：
 
-#+BEGIN_SRC 
+#+BEGIN_SRC
 void foo(void)
 {
  a=1;
@@ -291,7 +287,7 @@ void bar(void)
 假设接下来cpu1的cache包含a，cpu0的cache包含b
 那么接下来的操作可能如下:
 
-#+BEGIN_SRC 
+#+BEGIN_SRC
       cpu 0(cache 包含 b)                    cpu 1(cache 包含 a)
 +-------------------------------------+------------------------------+
 | 执行 a=1,缓存行不在cpu0的cache,       |                              |
@@ -320,10 +316,10 @@ void bar(void)
 |                                     |** 执行assert(a==1),因为他正在使用 | < ---根本原因在于其他cpu对存在于本cpu cache里数据的store操作，
 |                                     |a的旧值，这个断言失败了             |   放到了其他cpu的store buffer，其他cpu然后发出的read invalidate ,但消息没有及时送达
 +-------------------------------------+---------------------------------+   ，因此修改并没有对当前cpu感知到，仍然使用了本地cache的旧值！
-|                                     | ** 收到 read invalidate 消息,    |
-|                                     | 然后把包含a的缓存行传输给cpu 0,并且 |
-|                                     | 把本地包含a的cache line  清空     | 
-|                                     |(invalidate)掉,但是这已经太晚了    |                                    
+|   | ** 收到 read invalidate 消息,       |
+|   | 然后把包含a的缓存行传输给cpu 0,并且 |
+|   | 把本地包含a的cache line  清空 |
+|   | (invalidate)掉,但是这已经太晚了     |
 +-------------------------------------+---------------------------------+
 | 收到包含a的缓存行然后应用到缓存的       |                                 |
 | store操作上,刚好赶上cpu 1的失败断言    |                                 |
@@ -336,7 +332,7 @@ void bar(void)
 硬件设计者没办法。因为cpu没办法知道哪个变量是受影响的，更不用说哪个变量可能受影响。更进一步，他们提供了
 memory barrier 指令，让软件告诉cpu这些关系。程序片段必须修改成包含 memory barrier:
 
-#+BEGIN_SRC 
+#+BEGIN_SRC
 void foo(void)
 {
  a=1;
@@ -354,7 +350,7 @@ smp_bm()让cpu在应用接下来的store操作之前先flush它的store buffer�
 或者它可以使用store buffer持有接下来的store操作直到store buffer里所有之前的操作都被应用(applied).
   用后面的方法,操作的序列可能如下:
 
-#+BEGIN_SRC 
+#+BEGIN_SRC
   cpu 0(cache 包含 b)             cpu 1(cache 包含 a)
 +-------------------------------------+------------------------------+
 | 执行 a=1,缓存行不在cpu0的cache,       |                              |
@@ -391,8 +387,8 @@ smp_bm()让cpu在应用接下来的store操作之前先flush它的store buffer�
 +-------------------------------------+---------------------------------+
 |                                     | ** 收到 read invalidate 消息,    |
 |                                     | 然后把包含a的缓存行传输给cpu 0,并且 |
-|                                     | 把本地包含a的cache line 清空      | 
-|                                     |                                 |                                    
+|                                     | 把本地包含a的cache line 清空      |
+|                                     |                                 |
 +-------------------------------------+---------------------------------+
 | 收到包含a的缓存行然后应用到缓存的store操|                                 |
 | 作上,把这行cache line 改成 modified   |                                 |
@@ -444,19 +440,61 @@ invalidation结束,而不考虑这些store是否引起cache miss的话.
 
   这种情况能够改善,如果能让invalidate acknowledge 消息更快的到达的话.一个这样坐的方式就是
 每个cpu都使用 无效消息队列( invalidate message queue,or "invalidate queues")
+
+
 ** 4.1 Invalidate Queues
 
 
+  invalidate message花太长时间的一个原因是他们必须确认对应的cache line真的变成了invalidated,
+并且这个invalidation可能被延迟,如果缓存正忙,比如说,如果cpu 正密集的读(loading) 和 写(storing)
+数据,而这些数据都存在于cache里.此外,如果大量的invalidate message在短时间到达,该cpu可能来不及处理
+它们,因此可能导致所有其他cpu延迟(stalling)
+  然而,cpu在发送acknowledgement之前不需要真的invalidate 对应的cache line.它可能取而代之的是把
+invalidate message 放到 queue里,如果它明确知道在针对对应的cache line发送更多的messages之前,这个
+message必须被处理(processed).
+
+
+ #+BEGIN_SRC
+    +---------+     +----------+
+    |  cpu0   |     |   cpu1   |
+    +-+-+--+--+     +--+--+---++
+      |  +-+----------+ |    +-+----------+
+      |  |storebuffer | |    |storebuffer |
+      |  +-+---------+  |    +-+----------+
+    +---+--+--+     +--+--+---++
+    |  Cache  |     |  Cache   |
+    +---+-----+     +------+---+
+        |                  |
+    +---------+     +----------+
+    |invalidate|    |invalidate|
+    |queue     |    |queue     |
+    +---------+     +----------+
+        +--interconnect----+
+           +------+------+
+           |   memory    |
+           +-------------+
+ #+END_SRC
+       *带无效队列的缓存(caches with invalidate queues)*
 
 ** 4.2 Invalidate Queues and Invalidate Acknowledge
+  带invalidate queues 的cpu可以在一个invalidate message一到达queue就发送acknowledgement,
+而不用等待一直到对应的cache line真正的被invalidated.当然,cpu在准备发送invalidation message的
+时候必须参考(refer)它的invalidate queue -- 如果对应的cache line 在invalidate queue里,那么cpu
+不能立刻发送(transmit)invalidate message;它必须等待直到对应的条目被处理为止.
+  放条目到invalidate queue是cpu处理对应的cache line条目并发送MESI protocol message之前的重要保证.只要对应的数据结构不是高度contented,cpu 很少被这个保证造成不便(inconvenienced).
+  无论如何,能够被放到invalidate queue里的invalidate messages为memory-misording提供了更多的
+机会,正如下面的讨论.
 
-** 4.3  Invalidate Queues and Memory Barriers
 
-  假设a 和 b初始化为0，
+** 4.3 无效队列和内存屏障 Invalidate Queues and Memory Barriers
+
+  让我们假设cpu把invalidation 请求放到队列,立刻回应(response)它们.这个方法最小化了进行写(store)操作的cpu的cache-invalidation延迟,但是可能会破坏memory barrier,下面例子会看到.
+
+ 假设a 和 b初始化为0，
 a是只读（MESI "shared" 状态）,
 b被 cpu 0持有（MESI "exclusive" or "modified"),
 然后假设 cpu 0执行 foo(), cpu 1执行 bar():
-#+BEGIN_SRC 
+#+BEGIN_SRC
 void foo(void)
 {
  a=1;
@@ -470,12 +508,170 @@ void bar(void)
 }
 #+END_SRC
 
- to be coutinued...
+
+操作的序列可能如下(带invalidate queue 能够导致memory barrier失效):
 
 
-* 5. Read  and  Write  Memory Barriers
-  上一部分,memory barrier 用来标记 store buffer 和 invalidate queue.但实际上在我们的代码片段里,foo()和
+#+BEGIN_SRC
+        cpu 0(cache 包含 b)                         cpu 1
++-------------------------------------+------------------------------+
+| 执行 a=1,对应的cache line在cpu0的cache|                              |
+|是只读的,所以cpu0把a的新值放到它的store |                               |
+|buffer 然后发送一个invalidate message, |                              |
+|目的是让对应的cache line从cpu 1 里无效  |                              |
++-------------------------------------+------------------------------+
+|                                     | 执行 while(b==0) continue,但是|
+|                                     | 包含b的缓存行不在缓存，所以它发送|
+|                                     |一个 read message             |
++-------------------------------------+------------------------------+
+|                                     |收到cpu0的invalidate message,把|
+|                                     |它存到队列里然后立刻回复(response)|
+|                                     |它                             |
++-------------------------------------+------------------------------+
+|cpu 0收到cpu1的回复(response),所以它可以|                              |
+|自由的处理过smp_mb(),把a的值从它的store |                              |
+|buffer移动到它的cache line            |                              |
++-------------------------------------+------------------------------+
+| 执行b=1,因为已经有了b的缓存行          |                              |
+|  (换句话说，缓存行是 modified)         |                              |
+|或者 exclusive 状态),所以它直接存储b的新 |                              |
+|值到cache line                        |                              |
++-------------------------------------+------------------------------+
+|收到 read 消息，并且传输包含已经更新b的值 |                              |
+|的 cache line 给cpu 1.同时标记它本地这  |                              |
+| 个cache line 的状态为 shared状态       |                              |
++-------------------------------------+------------------------------+
+|                                     | 收到包含b的缓存行并且存到它自己  |
+|                                     | 的cache                       |
++-------------------------------------+------------------------------+
+|                                     | 现在可以结束执行while(b==0)continue|
+|                                     | 因为它发现b的值是1,它继续执行下个语句|
++-------------------------------------+---------------------------------+
+|                                     |执行assert(a==1),并且,因为a的旧值  |< --已经收到了a的invalidate message,
+|                                     |仍然在cpu 1的cache,这个断言失败    |   还能继续读cache?而不重新read?
++-------------------------------------+--------------------------------+
+#+END_SRC
+
+
+  很清楚,加速invalidation response这样做会引起memory barrier 被忽略(ignored),那么这样做没什么意义.然而,
+内存屏障指令可以和invalidate queue 无效队列交互,这样当给定的cpu执行一个memory barrier时,它标记所有在它invalidate queue
+里的条目,强制任何接下来的读(load)一直等待,知道所有标记条目被应用到cpu缓存(applyed to cpu cache).因此我们添加一个memory
+barrier 给函数bar,如下:
+
+#+BEGIN_SRC
+void foo(void)
+{
+ a=1;
+ smp_mb();
+ b=1;
+}
+void bar(void)
+{
+ while(b==0) continue;
+ smp_mb();
+ assert(a==1);
+}
+#+END_SRC
+
+操作的序列可能如下(带invalidate queue的,需要添加两个memory barrier来保证正确):
+
+{
+ 假设a 和 b初始化为0，
+ a是只读（MESI "shared" 状态）,
+ b被 cpu 0持有（MESI "exclusive" or "modified"),
+ 然后假设 cpu 0执行 foo(), cpu 1执行 bar()
+}
+#+BEGIN_SRC
+        cpu 0(cache 包含 b)                         cpu 1
++-------------------------------------+------------------------------+
+| 执行 a=1,对应的cache line在cpu0的cache|                              |
+|是只读的,所以cpu0把a的新值放到它的store |                               |
+|buffer 然后发送一个invalidate message, |                              |
+|目的是让对应的cache line从cpu 1 里无效  |                              |
++-------------------------------------+------------------------------+
+|                                     | 执行 while(b==0) continue,但是|
+|                                     | 包含b的缓存行不在缓存，所以它发送|
+|                                     |一个 read message             |
++-------------------------------------+------------------------------+
+|                                     |收到cpu0的invalidate message,把|
+|                                     |它存到队列里然后立刻回复(response)|
+|                                     |它                             |
++-------------------------------------+------------------------------+
+|cpu 0收到cpu1的回复(response),所以它可以|                              |
+|自由的经过smp_mb(),把a的值从它的store   |                              |
+|buffer移动到它的cache line            |                              |
++-------------------------------------+------------------------------+
+| 执行b=1,因为已经有了b的缓存行          |                              |
+|  (换句话说，缓存行是 modified)         |                              |
+|或者 exclusive 状态),所以它直接存储b的新 |                              |
+|值到cache line                        |                              |
++-------------------------------------+------------------------------+
+|收到 read 消息，并且传输包含已经更新b的值 |                              |
+|的 cache line 给cpu 1.同时标记它本地这  |                              |
+| 个cache line 的状态为 shared状态       |                              |
++-------------------------------------+------------------------------+
+|                                     | 收到包含b的缓存行并且存到它自己  |
+|                                     | 的cache                       |
++-------------------------------------+------------------------------+
+|                                     | 现在可以结束执行while(b==0)continue| <-- 相对上面是新增的过程
+|                                     | 因为它发现b的值是1,它继续执行下个语句|
+|                                     | 现在是个memory barrier           |
++-------------------------------------+---------------------------------+
+|                                     |cpu1 现在必须停顿,直到它处理完invalidate|
+|                                     |queue里的所有messages              |
++-------------------------------------+---------------------------------+
+|                                     |cpu 1 现在处理放到队列里的invalidate|
+|                                     |message并且把它cache里的包含a的cache|
+|                                     | line 无效掉(invalidates)         |
++-------------------------------------+---------------------------------+
+|                                     |执行assert(a==1),因为包含a的cache |
+|                                     |line 已经不在cache里,它发送一个read message|
++-------------------------------------+--------------------------------+
+|cpu0回应这个read消息,用包含a的新值的cache|                               |
+|line 作为回应                          |                               |
++-------------------------------------+--------------------------------+
+|                                     |cpu1收到cache line,它包含了a的值1 |
+|                                     |所以断言没有被触发                |
++-------------------------------------+--------------------------------+
+#+END_SRC
+
+用了很多的MESI消息传递,cpu终于得到了正确的答案.这表明cpu设计者必须对内存一致优化十分小心.
+
+
+* 5. 读和写内存屏障( Read  and  Write  Memory Barriers)
+
+
+上一部分,memory barrier 用来标记 store buffer 和 invalidate queue.但实际上在我们的代码片段里,foo()和
 invalidate queue什么关系都没有,bar()类似的,和store buffer也没什么关系.
   因此许多cpu架构提供了更弱一点的 memory barrier指令,仅和某个或两个都有关系.简单讲,"read memory barrier"仅仅标记了
 invalidate queue,"write memory barrier" 仅仅标记了store buffer.而 一个full-fledged memory barrier两个都标记.
-fledged
+  这样的效果是一个读内存屏障(read memory barrier)仅仅和执行它的cpu上的读(load)操作有顺序关系,这样所有在读内存屏障(read memory barrier)之前所有的读必须在读内存屏障之后的任何读之前先完成.类似的,一个写(write)内存屏障仅仅和执行它的cpu上的写(store)操作有顺序
+关系,并且所有写内存屏障(write memory barrier)之前的写操作必须在写内存屏障之后的写(store)之前完成.一个满(full-fledged)memory 
+barrier和读和写都有顺序关系,当然仅限于执行内存屏障的cpu上面.
+ 
+  如果我们更新foo 和 bar用读和写屏障,他们像下面这样:
+#+BEGIN_SRC
+void foo(void)
+{
+ a=1;
+ smp_wmb();
+ b=1;
+}
+void bar(void)
+{
+ while(b==0) continue;
+ smp_rmb();
+ assert(a==1);
+}
+#+END_SRC
+
+有些电脑有更多种类(flavors)的内存屏障,但是理解这三个变体基本上给内存屏障提供一个好的介绍.
+
+
+* 6 内存屏障序列的例子
+
+seductive(诱人,迷人的)
+subtly(狡猾,精巧,微妙)
+hostile(敌意的；敌对的；坚决否定；强烈反对)
+perceive(认为；意识到；注意到；察觉到)
+
