@@ -1,6 +1,6 @@
 #+TITLE: Sitemap
 
-   + [[file:MemoryBarrierAHardwareViewForSoftwareHackers.org][2016-04-21 MemoryBarrierAHardwareViewForSoftwareHackers]]
+   + [[file:MemoryBarrierAHardwareViewForSoftwareHackers.org][2016-04-22 MemoryBarrierAHardwareViewForSoftwareHackers]]
    + [[file:lockfreequeue.org][2016-04-15 lockfreequeue]]
    + [[file:other-memory-barrier.org][2016-04-15 other-memory-barrier]]
    + [[file:memory_barrier.org][2016-04-15 内存栅栏]]
