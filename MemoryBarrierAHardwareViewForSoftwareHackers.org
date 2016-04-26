@@ -1,5 +1,8 @@
 #+TITLE Memory Barriers: a Hardware View for Software Hackers
 
+原文地址:
+http://www.rdrop.com/users/paulmck/scalability/paper/whymb.2010.06.07c.pdf
+
 是什么促使cpu设计者去把memory barrier强加给可怜的SMP软件设计者？
   因为reordering memory有更好的效率
 * summary

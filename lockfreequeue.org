@@ -5,7 +5,7 @@
     因为使用mutex会导致操作系统进行线程context的切换，而CAS仅仅是个函数调用（当然也有开销，锁住总线）
     
 * ABA问题
-** 什么事ABA问题
+** 什么是ABA问题
   - 有一个线程共享变量v
   - thread1中读到v的值为A，这时线程被抢占，thread2被执行
   - thread2修改v的值为B，然后又改成A,这时thread2被抢占，thread1又执行
@@ -72,6 +72,84 @@ head 是第一个可写位置，tail 是第一个可读位置
 
 * memory barrier
   *关于lockfree queue*我这个代码，暂时没想清楚到底 memory barrier 是否应该加，以及加在哪里
+唯一涉及到顺序的是判空和判满的时候,可能会出现误判,但是不会影响逻辑(比如push判满时,其实没有满,但是却
+返回了满,不能插入,不会影响逻辑)
+
+下面文章有点启发:
+http://stackoverflow.com/questions/1787450/how-do-i-understand-read-memory-barriers-and-volatile/1787503#1787503
+#+begin_src 
+
+There are read barriers and write barriers; acquire barriers and release barriers. And more (io vs memory, etc).
+
+The barriers are not there to control "latest" value or "freshness" of the values. They are there to control the relative ordering of memory accesses.
+
+Write barriers control the order of writes. Because writes to memory are slow (compared to the speed of the CPU), there is usually a write-request queue where writes are posted before they 'really happen'. Although they are queued in order, while inside the queue the writes may be reordered. (So maybe 'queue' isn't the best name...) Unless you use write barriers to prevent the reordering.
+
+Read barriers control the order of reads. Because of speculative execution (CPU looks ahead and loads from memory early) and because of the existence of the write buffer (the CPU will read a value from the write buffer instead of memory if it is there - ie the CPU thinks it just wrote X = 5, then why read it back, just see that it is still waiting to become 5 in the write buffer) reads may happen out of order.
+
+This is true regardless of what the compiler tries to do with respect to the order of the generated code. ie 'volatile' in C++ won't help here, because it only tells the compiler to output code to re-read the value from "memory", it does NOT tell the CPU how/where to read it from (ie "memory" is many things at the CPU level).
+
+So read/write barriers put up blocks to prevent reordering in the read/write queues (the read isn't usually so much of a queue, but the reordering effects are the same).
+
+What kinds of blocks? - acquire and/or release blocks.
+
+Acquire - eg read-acquire(x) will add the read of x into the read-queue and flush the queue (not really flush the queue, but add a marker saying don't reorder anything before this read, which is as if the queue was flushed). So later (in code order) reads can be reordered, but not before the read of x.
+
+Release - eg write-release(x, 5) will flush (or marker) the queue first, then add the write-request to the write-queue. So earlier writes won't become reordered to happen after x = 5, but note that later writes can be reordered before x = 5.
+
+Note that I paired the read with acquire and write with release because this is typical, but different combinations are possible.
+
+Acquire and Release are considered 'half-barriers' or 'half-fences' because they only stop the reordering from going one way.
+
+A full barrier (or full fence) applies both an acquire and a release - ie no reordering.
+
+Typically for lockfree programming, or C# or java 'volatile', what you want/need is read-acquire and write-release.
+
+ie
+
+void threadA()
+{
+   foo->x = 10;
+   foo->y = 11;
+   foo->z = 12;
+   write_release(foo->ready, true);
+   bar = 13;
+}
+void threadB()
+{
+   w = some_global;
+   ready = read_acquire(foo->ready);
+   if (ready)
+   {
+      q = w * foo->x * foo->y * foo->z;
+   }
+   else
+       calculate_pi();
+}
+
+So, first of all, this is a bad way to program threads. Locks would be safer. But just to illustrate barriers...
+
+After threadA() is done writing foo, it needs to write foo->ready LAST, really last, else other threads might see foo->ready early and get the wrong values of x/y/z. So we use a write_release on foo->ready, which, as mentioned above, effectively 'flushes' the write queue (ensuring x,y,z are committed) then adds the ready=true request to the queue. And then adds the bar=13 request. Note that since we just used a release barrier (not a full) bar=13 may get written before ready. But we don't care! ie we are assuming bar is not changing shared data.
+
+Now threadB() needs to know that when we say 'ready' we really mean ready. So we do a read_acquire(foo->ready). This read is added to the read queue, THEN the queue is flushed. Note that w = some_global may also still be in the queue. So foo->ready may be read before some_global. But again, we don't care, as it is not part of the important data that we are being so careful about. What we do care about is foo->x/y/z. So they are added to the read queue after the acquire flush/marker, guaranteeing that they are read only after reading foo->ready.
+
+Note also, that this is typically the exact same barriers used for locking and unlocking a mutex/CriticalSection/etc. (ie acquire on lock(), release on unlock() ).
+
+So,
+
+    I'm pretty sure this (ie acquire/release) is exactly what MS docs say happens for read/writes of 'volatile' variables in C# (and optionally for MS C++, but this is non-standard). See http://msdn.microsoft.com/en-us/library/aa645755(VS.71).aspx including "A volatile read has "acquire semantics"; that is, it is guaranteed to occur prior to any references to memory that occur after it..."
+
+    I think java is the same, although I'm not as familiar. I suspect it is exactly the same, because you just don't typically need more guarantees than read-acquire/write-release.
+
+    In your question you were on the right track when thinking that it is really all about relative order - you just had the orderings backwards (ie "the values that are read are at least as up-to-date as the reads before the barrier? " - no, reads before the barrier are unimportant, its reads AFTER the barrier that are guaranteed to be AFTER, vice versa for writes).
+
+    And please note, as mentioned, reordering happens on both reads and writes, so only using a barrier on one thread and not the other WILL NOT WORK. ie a write-release isn't enough without the read-acquire. ie even if you write it in the right order, it could be read in the wrong order if you didn't use the read barriers to go with the write barriers.
+
+    And lastly, note that lock-free programming and CPU memory architectures can be actually much more complicated than that, but sticking with acquire/release will get you pretty far.
+
+
+#+end_src
+
   
 * ringbuffer
   实际上是一个数组，通过对数组的下标index进行取模%操作来进行访问，当超过长度会回环到数组的开始，看起来是一个ring而已
@@ -99,7 +177,7 @@ inline unsigned int CAS(volatile unsigned int * reg, unsigned int oldval, unsign
 ** lockfree queue 代码
    - ringbuffer 和 lockfree queue定义
 #+begin_src c -n
-      #define RINGBUFFERSZ 8
+#define RINGBUFFERSZ 8
 struct ringbuffer
 {
 	volatile unsigned int head;//write index
@@ -132,7 +210,6 @@ ringbuffer * create_ringbuffer(unsigned int bfsz)
 int push(ringbuffer* rb, int data)
 {
 	unsigned int seq;
-	unsigned int back_door;
 	unsigned int sz = rb->sz;
 	int ok = 0;
 	unsigned int try_cnt = 0;
@@ -140,15 +217,14 @@ int push(ringbuffer* rb, int data)
 	do 
 	{
 		try_cnt++;
-		if (try_cnt > 5)
+		if (try_cnt > 1)
 		{
 			sleep(0);//让给其他线程去执行
 		}
 		seq = rb->head;
-		back_door = rb->back_door;
-		if ((seq + sz + 1) % sz == back_door)//check full,写入不能覆盖未读取的数据
+		if ((seq + sz + 1) % sz ==  rb->back_door)//check full,写入不能覆盖未读取的数据
 			return -1;
-        //潜在ABA问题所在？此时&rb->head被其他线程修改成其他值，然后又修改为和seq相等的值？
+		//潜在ABA问题所在？此时&rb->head被其他线程修改成其他值，然后又修改为和seq相等的值？
 		//会出现这个问题
 		ok = CAS(&rb->head, seq, (seq + 1) % sz);
 	} while (!ok);
@@ -161,7 +237,7 @@ int push(ringbuffer* rb, int data)
 	while (!CAS(&rb->front_door, seq, (seq + 1)%sz))
 	{
 		try_cnt++;
-		if (try_cnt > 5)
+		if (try_cnt > 1)
 		{
 			sleep(0);//让给其他线程去执行
 		}
@@ -173,9 +249,7 @@ int push(ringbuffer* rb, int data)
 #+begin_src c -n
 int pop(ringbuffer* rb)
 {
-	unsigned int head;
 	unsigned int seq;
-	unsigned int front_door;
 	unsigned int sz = rb->sz;
 	int ok = 0;
 	unsigned int try_cnt = 0;
@@ -183,14 +257,12 @@ int pop(ringbuffer* rb)
 	do 
 	{
 		try_cnt++;
-		if (try_cnt > 5)
+		if (try_cnt > 1)
 		{
 			sleep(0);//让给其他线程去执行
 		}
-		head = rb->head;
 		seq = rb->tail;
-		front_door = rb->front_door;
-		if ((seq + sz) % sz == front_door)//check empty，不能读取未写入完成的数据
+		if ((seq + sz) % sz == rb->front_door)//check empty，不能读取未写入完成的数据
 		{
 			return -1;
 		}
@@ -204,7 +276,7 @@ int pop(ringbuffer* rb)
 	while (!CAS(&rb->back_door,  seq  , (seq+1) % sz))
 	{
 		try_cnt++;
-		if (try_cnt > 5)
+		if (try_cnt > 1)
 		{
 			sleep(0);//让给其他线程去执行
 		}
@@ -213,4 +285,183 @@ int pop(ringbuffer* rb)
 }
 #+end_src 
 
+** 解决ABA问题的 lockfree queue 代码
+
+#+BEGIN_SRC 
+#define RINGBUFFERSZ 8
+struct ringbuffer
+{
+	volatile unsigned int head;//write index
+	volatile unsigned int tail;//read index
+
+	volatile unsigned int front_door;
+	volatile unsigned int back_door;
+	unsigned int sz;
+	unsigned int *buf;
+};
+
+
+//计数器CNTR占32bit中的高N位,剩下的就是指针(PNTR)--其实就是索引,占的bits
+#define ABA_CNTR_BITS 8
+ 
+#define ABA_CNTR(uint32) (uint32 >> ((32 - ABA_CNTR_BITS)) & ( (1 << ABA_CNTR_BITS) - 1))
+#define ABA_PNTR(uint32) ((uint32) & (  (1 << (32-ABA_CNTR_BITS)) - 1))
+
+#define ABA_COMPOSE(counter,pointer) ( (((counter)&( (1<<ABA_CNTR_BITS)-1)) << (32 - ABA_CNTR_BITS)) \
+	| ((pointer)& ((1 << (32 - ABA_CNTR_BITS)) - 1)))
+
+
+/*
+head 是第一个可写位置，tail 是第一个可读位置
+       tail=1                        head=6
++-----+-----+-----+-----+-----+-----+-----+-----+
+|empty| A   |  B  |  C  |  D  |  E  |empty|empty|
++-----+-----+-----+-----+-----+-----+-----+-----+
+   0     1     2     3     4     5     6     7
+
+  如果不限制head和tail，那么当head == tail的时候，无法区分是满还是空
+  所以这里限制满的时候 (head + sz)%sz - 1 == tail，就是说满的时候
+  元素数量等于sz - 1;
+  
+	队列满                head=4 tail=5 
+  +-----+-----+-----+-----+-----+-----+-----+-----+
+  |  H  | A   |  B  |  C  |empty|  E  |  F  |  G  |
+  +-----+-----+-----+-----+-----+-----+-----+-----+
+     0     1     2     3     4     5     6     7
+
+
+  而当(head + sz)%sz  == tail 表示空，最开始head=0，tail=0，也就表示空
+
+  队列空                   head=4 
+                           tail=4
+  +-----+-----+-----+-----+-----+-----+-----+-----+
+  |empty|empty|empty|empty|empty|empty|empty|empty|
+  +-----+-----+-----+-----+-----+-----+-----+-----+
+     0     1     2     3     4     5     6     7
+
+  下面显示了push和pop时候维护的4个有用的元素：
+  head表示当前可以write（push）的索引
+  tail表示当前可以read(pop)的索引
+
+  [front_door,head) 表示当前正在写入的indexes，读操作不能越过front_door( (tail + sz) % sz == front_door ) 
+  [back_foor,tail)  表示当前正在读取的indexes，写操作不能越过back_door ( (head + sz + 1) % sz == back_door )
+  <---------------------- <-------------------------
+  |										          / \
+  |										           |
+  |										           |
+ \ /									           |
+  ... back_door --> tail ... front_door --> head ...
+*/
+ringbuffer * create_ringbuffer(unsigned int bfsz)
+{
+	ringbuffer *rb = (ringbuffer*)malloc(sizeof(ringbuffer));
+	memset(rb, 0, sizeof(*rb));
+	rb->head = 0;
+	rb->tail = 0; 
+	rb->front_door = 0;//最后一个真正可以pop的
+	rb->back_door =0;//从它之后pop
+	rb->sz = bfsz;
+	rb->buf = (unsigned int *)malloc(sizeof(unsigned int)* bfsz);
+	memset(rb->buf, 0, sizeof(unsigned int)* bfsz);
+
+	return rb;
+}
+
+
+int push_ABA(ringbuffer* rb, int data)
+{
+	unsigned int seq;
+	unsigned int sz = rb->sz;
+	int ok = 0;
+	unsigned int try_cnt = 0;
+	//分配唯一可以写入的索引
+	do
+	{
+		try_cnt++;
+		if (try_cnt > 1)
+		{
+			sleep(0);//让给其他线程去执行
+		}
+		seq = rb->head;
+		if ((ABA_PNTR(seq) + sz + 1) % sz == ABA_PNTR(rb->back_door))//check full,写入不能覆盖未读取的数据
+			return -1;
+		//潜在ABA问题所在？此时&rb->head被其他线程修改成其他值，然后又修改为和seq相等的值？
+		//会出现这个问题
+		unsigned int cntr = ABA_CNTR(seq);
+		unsigned int pntr = ABA_PNTR(seq);
+		cntr = cntr + 1;
+		pntr = (pntr + 1) % sz;
+		unsigned int seq_new = ABA_COMPOSE(cntr,pntr);
+		ok = CAS(&rb->head, seq, seq_new);
+	} while (!ok);
+
+	unsigned int idx = ABA_PNTR(seq);
+
+	rb->buf[idx] = data;
+
+	//commit，如果线程T1分配到的序号等于front_door,那么向前移动front_door，否则说明有其他线程T2(或者还有T3..)同时在push，需要while等到T
+	//向前移动front_door之后才能向前移动front_door
+	try_cnt = 0;
+
+	unsigned int pntr = 0;
+	do
+	{
+		try_cnt++;
+		if (try_cnt > 1)
+		{
+			sleep(0);//让给其他线程去执行
+		}
+		//只需要指针部分,front door 和 back door 不需要计数器
+		pntr = ABA_PNTR(seq);
+	} while (!CAS(&rb->front_door, pntr, (pntr + 1) % sz));
+	return 0;
+}
+
+
+int pop_ABA(ringbuffer* rb)
+{
+	unsigned int seq;
+	unsigned int sz = rb->sz;
+	int ok = 0;
+	unsigned int try_cnt = 0;
+	//分配唯一可以读取的索引
+	do
+	{
+		try_cnt++;
+		if (try_cnt > 1)
+		{
+			sleep(0);//让给其他线程去执行
+		}
+		seq = rb->tail;
+		if ((seq + sz) % sz == rb->front_door)//check empty，不能读取未写入完成的数据
+		{
+			return -1;
+		}
+		unsigned int cntr = ABA_CNTR(seq);
+		unsigned int pntr = ABA_PNTR(seq);
+		cntr = cntr + 1;
+		pntr = (pntr + 1) % sz;
+		unsigned int seq_ = ABA_COMPOSE(cntr, pntr);
+		ok = CAS(&rb->tail, seq, seq_);
+	} while (!ok);
+	unsigned int idx = ABA_PNTR(seq);
+	int data = rb->buf[idx];
+
+	//commit，原理和push的类似
+	try_cnt = 0;
+	unsigned int pntr = 0;
+	do 
+	{
+		try_cnt++;
+		if (try_cnt > 1)
+		{
+			sleep(0);//让给其他线程去执行
+		}
+		pntr = ABA_PNTR(seq);
+	} while (!CAS(&rb->back_door, pntr, (pntr + 1) % sz));
+	return data;
+}
+
+
+#+END_SRC
 * cache treshing（内存颠簸）

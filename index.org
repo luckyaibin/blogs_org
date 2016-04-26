@@ -3,8 +3,11 @@
 * 内存栅栏 [[file:memory_barrier.org][view it]]
  栅栏的存在是为了解决多线程乱序执行的问题:而乱序有两种 
 1. 编译器重排指令
-2. cpu为了效率，颠倒指令执行顺序
+2. cpu为了效率，颠倒指令执行顺序(实际并不是指令乱序,而是因为变量读取出来的顺序不一样,导致看起来像是指令乱序)
 
+* MemoryBarrierAHardwareViewForSoftwareHackers 
+一篇介绍memory barrier的好文章,本人翻译(有机器翻译的感觉..) 
+[[file:MemoryBarrierAHardwareViewForSoftwareHackers.org][view it]] 
 * 无锁队列 [[file:lockfreequeue.org][view it]]
 ** lockfree
    1. 什么是lockfree,不是不需要同步，而是不用开销大的mutex等，仅仅使用 CAS 原子操作进行 *同步*
