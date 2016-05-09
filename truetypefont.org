@@ -1,0 +1,254 @@
+
+
+* 概述
+
+http://www.docin.com/p-44990240.html
+
+ PostScript Type1 Adobe开发的字体,加密过,收取专利费的.采用三次B-样条.
+
+ TrueType 由 Microsft 和 Apple联科开发的PDL(page description language)语言TrueImage中的字型描述部分.最初指向打破
+PostScript发明者 Adobe在该领域的垄断地位.采用二次B-样条(Bezier-spline).(推出后,Type1宣布免费)
+
+ OpenType  由 Microsotf ,Adobe联合开发,是TrueType的扩展,添加了对 -PostScript- 的支持.
+扩展名可能是.OTP或.TTF
+
++ 只包含CFF(PostScript)数据(没有TrueType outlines)的字库扩展名总是.OTF
++ 出于兼容,包含TrueType outlines的字库起扩展名可能是.OTF或者.TTF .
++ 无论字库中是否包含OpenType layout,TrueType Collection字库扩展名应该是.TTC .
+
+
+* TTF文件总体结构
+  文件头(offset table)
+  描述表目录(table directory)
+  描述表(tables)
+
+** offset table:
+#+BEGIN_SRC
+  fixed sfnt_version;     //TTF文件版本号
+  ushort numTables;        //描述表数目
+  ushort searchRange;      //描述表快速查找范围
+  ushort entrySelector;    //描述表入口选择
+  ushort rangeShift;       //范围调整
+#+END_SRC
+
+**  描述表目录:(个数由numTables决定,每个目录项16字节)
+#+BEGIN_SRC
+  ulong tag;              //描述表名称(4个字符)
+  ulong checkSum;         //描述表内容的校验和
+  ulong offset;           //此描述表的位置偏移(从文件头开始)
+  ulong length;           //描述表字节长度
+#+END_SRC
+
+** 各个描述表的结构不同
+  常用的TTF文件描述表共有19个,其中有10个位每个FFT必须包含的,其他9个可根据需要任选.
++ 以下10个为必须的:
+#+BEGIN_SRC
+  'cmap'       字符代码到文字序号的映射表(character to glyph index mapping table)
+  'glyf'       文字轮廓数据(glyph data)
+  'head'       文件头信息(font header)
+  'hhea'       水平度量头信息(horizontal header)
+  'hmtx'       水平度量信息(horizontal matries)
+  'loca'       字符轮廓数据位置索引(index to location)
+  'maxp'       最大值描述(maximum profile)
+  'name'       名字表(naming table)
+  'post'       Postscript 打印机控制
+  'OS/2'       OS/2和Windows度量信息(OS/2 and Windows metrics)
+#+END_SRC
+
++ 以下9个是可选的描述表:
+#+BEGIN_SRC
+  'cvt'       控制值表(control value table)
+  'fpgm'      定义程序(font program)
+  'hdmx'      水平设备度量(horizontal device metrics)
+  'kern'      紧排控制(kerning)
+  'LTSH'      线性门限(linear threshold)
+  'prep'      CVT程序区(control value program)
+  'WIN'       保留(reserved for future use)
+  'VDMX'      垂直设备度量(vertical device metrics)
+  'FOCA'      保留(reserved for IBM Object Content Architecture data)
+#+END_SRC
+
+*** 代码映射表 'cmap'
+
+
+* 描述表介绍
+
+** 代码映射表 'cmap'
+
+** 轮廓数据表 'glyf'
+
+** 文件投标 'head'
+
+** 轮廓数据索引表 'loca'
+
+** 最大值描述表 'maxp'
+
+
+
+* 关于cmap里的segCountX2,searchRange,entrySelector,rangeShift和针对binary search的优化
+
+Format 4 是双字节编码。这种格式用于字体文件中的编码分布与几个连续的区域，在区域之间可能有一些保留的空白。而有一些编码可能并不会与字体中的glyph对应。2字节的压缩编码则使用format6。
+
+Format4的格式:
+#+BEGIN_SRC
+struct cmap_subtable_format4
+{
+#define  segCount 10000
+#define  arbitrary_length 10000
+	USHORT 	format;//	 	 	Format number is set to 4.
+	USHORT 	length;//	 		This is the length in bytes of the subtable.
+	USHORT 	language;//	 	 	Please see “Note on the language field in 'cmap' subtables“ in this document.
+	USHORT 	segCountX2;//	 	 	2 x segCount.
+	USHORT 	searchRange;//	 		2 x(2 * *floor(log2(segCount)))
+	USHORT 	entrySelector;//	 		log2(searchRange / 2)
+	USHORT 	rangeShift;//	 		2 x segCount - searchRange
+	USHORT 	endCount[segCount];//	 	 	End characterCode for each segment, last = 0xFFFF.
+	USHORT 	reservedPad;//	 	 	Set to 0.
+	USHORT 	startCount[segCount];//	 	 	Start character code for each segment.
+	SHORT 	idDelta[segCount];//	 	 	Delta for all character codes in segment.
+	USHORT 	idRangeOffset[segCount];//	 	 	Offsets into glyphIdArray or 0
+	USHORT 	glyphIdArray[arbitrary_length];//		Glyph index array(arbitrary length)
+#undef segCount
+#undef arbitrary_length 10000
+};
+
+#+END_SRC
+
+segCount以及idDelta存在的目的,是因为字符编码不是连续的(为什么不连续还不清楚):
+
+比如:字符编码10－20，30－990，100－153才拥有对应的glyph索引.
+如果不进行特殊处理,那么glyph映射必定也是
+glyph[0] = 没有笔画数据
+glyph[1] = 没有笔画数据
+...
+glyph[10]=笔画数据
+glyph[11]=笔画数据
+...
+glyph[20]=笔画数据
+
+glyph[21]=没有笔画数据
+...
+导致glyph数据有很多空白.所以需特殊处理,把不连续的数据映射到从0开始都有数据的glyph数组上.
+使用了idDelta来差量计算(某个segment以及之前的segment"跳过"了多少个数据,进行差值计算)
+
+
+为什么使用segCount和对应的searchRange,entrySelector,rangeShift能够进行优化过的 optimized binary search(二分查找)?
+
+其实真正有用的是segCount,其他的数据都是根据segCount计算出来的:
+比如:字符编码10－20，30－990，100－153才拥有对应的glyph索引,那么分为4段(最后一个增加的是为了表示段表结束)
+
+#+BEGIN_SRC
++-------------+----------+----------+-------------+----------+
+|Name         |segment 1 |segment 2 |segment 3    |segment 4 |
+|             |char 10-20|char 30-90|char 100-153 |MissingGlyph|
++-------------+----------+----------+-------------+----------+
+|startCode    |  10      |  30      |  100        | 0xFFFF   |
++-------------+----------+----------+-------------+----------+
+|endCode      |  20      |  90      |  153        | 0xFFFF   |
++-------------+----------+----------+-------------+----------+
+|idDelta      |  -9      |  -18     |  -27        |  x       |
++-------------+----------+----------+-------------+----------+
+|idRangeOffset|  0       |  0       |  0          |  0       |
++-------------+----------+----------+-------------+----------+
+
+#+END_SRC
+针对这几个值的解释,其实https://partners.adobe.com/public/developer/en/font/5180.sfnt.pdf 这里说的比较清楚
+UINT16 startCode[size],每个元素的大小是sizeof(UINT16) = 2
+那么针对ttf或ttc文件里存储的数据,如果segCount=39,那么文件里各个字段:
+segCountX2 	    78  (39*2)                       ---> segCount*2 = 39*2=78
+searchRange 	64 	(2 * largest power of 2 <=39)---> sizeof(UINT16) * (小于等于39的最大的2的幂)
+entrySelector 	5 	log2 (32)                    ---> log2(小于等于39的最大的2的幂)==log2(searchRange>>1)
+rangeShift 	    14 	2 x 39 - 64                  ---> sizeof(UINT16) * ( segCount-小于等于39的最大的2的幂) = 2 * segCount - 2*(小于等于39的最大的2的幂) = 2*segCount - searchRange
+
+也就是说,searchRange里和rangeShift里的乘以2,根本就很混淆视听,它把搜索范围用乘以2的操作转成了字节(byte),根本不直观.
+不如把searchRange 和 rangeShift就当成segCount的搜索范围来得直观.
+假设已经从文件里读取出来了segCountX2,searchRange,entrySelector,rangeShift的值:
+二分查找伪代码:
+
+#+BEGIN_SRC
+segCount = segCountX2 >> 1;                    ---> 39
+searchRange = searchRange>>1                   ---> 32
+entrySelector = entrySelector;                 ---> 5
+rangeShift = rangeShift >> 1;                  ---> 7
+
+经过上面的操作,接下来这4者之间的关系如下:
+
+entrySelector=N,也就是二分查找searchRange所需要的次数
+rangeShift一定是小于searchRange的!因为searchRange小于等于segCount的最大的2^N,如果
+rangeShift >= searchRange,那么searchRange就应该是2^(N+1),矛盾
+|-----------------------segCount--------------------|
+|--rangeShift--|-------searchRange--(2^N)-----------|
+
+
+endCode[segCount]数组,一共是segCount个元素:
+  0    1    2     ...                      segCount-1
+|-20-|-90-|-153-| ...                   ...|-0xFFFF-|
+
+
+因为endCount[segCount]数组是按照endCode升序排列的,
+我们需要寻找第一个endCode大于等于character code的段(段的索引,0,1,2...),然后检查
+startCode是否小于等于character code,如果是则根据idDelta[N]和idRangeOffset去映射glyph索引(index),
+否则返回 missingGlyph.
+
+ +------------------------------+     +-----------------------------------------+
+ |                              |     |                                         |
+ |       startCode              |     |                            endCode      |
+ |  +----------------------+    |     |   index:     address:    +---------+    |
+ |  |    10                |    |     |     0         0xBBB1     | 20      |    |
+ |  |----------------------+    |     |                          +---------+    |
+ |  |    30                |    |     |     1         0xBBB2     | 90      |    |
+ |  +----------------------+    |     |                          |---------+    |
+ |  |    100               |    |     |     2         0xBBB3     | 153     |    |
+ |  +----------------------+    |     |                          |---------+    |
+ |  |                      |    |     |     3         0xBBB4     | ...     |    |
+ |  +----------------------+    |     |                          +---------+    |
+ |  |                      |    |     |                          |         |    |
+ |  |                      |    |     |                          |         |    |
+ |  +----------------------+    |     |                          +---------+    |
+ |  |                      |    |     |                          |         |    |
+ |  +----------------------+    |     |                          |---------+    |
+ |  |  0xFFFF              |    |     |  segCount-1   0xXXXX     | 0xFFFF  |    |
+ |  +----------------------+    |     |                          +---------+    |
+ |                              |     |                                         |
+ +------------------------------+     +-----------------------------------------+
+
+int search_index = 0;
+//一共是segCount,而索引是0开始的,所以索引是0-segCount-1;
+if codepoint >=endCode[rangeShift-1] then
+  search_index = search_index + rangeShift - 1;
+end
+
+//rangeShift一定是小于searchRange的!因为searchRange小于等于segCount的最大的2^N,如果
+//rangeShift >= searchRange,那么searchRange就应该是2^(N+1),矛盾
+//所以二分查找一定在entrySelector次后结束
+
+//针对10个元素的endCode数组:
+//索引:         0 1 2 3 4 5 6 7 8 9
+//rangeShift-1=2-1=1
+//entrySelector=4;
+//searchRange=8
+//这里有个特性,也就是关键点,searchRange会历经 8 4 2 1 0(到0就结束)
+//比如 1 2 4 8 16 32 64 128 ... N1 ... N2 这种序列,小于N的任意数,可以由比它小的序列相加来得到!
+//例如,小于32 的 数可以由 1 2 4 8 16来得到:
+      1 + 2 + 4 + 8 + 16 = 31
+          2 + 4 + 8 + 16 = 30
+      1     + 4 + 8 + 16 = 29
+              4 + 8 + 16 = 28
+      1 + 2     + 8 + 16 = 27
+          2     + 8 + 16 = 26
+      1         + 8 + 16 = 25
+                  8 + 16 = 24
+      1 + 2 + 4     + 16 = 23
+          2 + 4     + 16 = 22
+      1     + 4     + 16 = 21
+              4     + 16 = 20
+      1 + 2         + 16 = 19
+          2         + 16 = 18
+      1             + 16 = 17
+
+while(entrySelector>0) do
+
+
+end
+
+#+END_SRC
