@@ -87,7 +87,8 @@ PostScript发明者 Adobe在该领域的垄断地位.采用二次B-样条(Bezier
 
 * 关于cmap里的segCountX2,searchRange,entrySelector,rangeShift和针对binary search的优化
 
-Format 4 是双字节编码。这种格式用于字体文件中的编码分布与几个连续的区域，在区域之间可能有一些保留的空白。而有一些编码可能并不会与字体中的glyph对应。2字节的压缩编码则使用format6。
+** Format 4 
+ 是双字节编码。这种格式用于字体文件中的编码分布与几个连续的区域，在区域之间可能有一些保留的空白。而有一些编码可能并不会与字体中的glyph对应。2字节的压缩编码则使用format6。
 
 Format4的格式:
 #+BEGIN_SRC
@@ -114,6 +115,7 @@ struct cmap_subtable_format4
 
 #+END_SRC
 
+** 从Format 4 里计算glyph索引
 segCount以及idDelta存在的目的,是因为字符编码不是连续的(为什么不连续还不清楚):
 
 比如:字符编码10－20，30－990，100－153才拥有对应的glyph索引.
@@ -131,6 +133,7 @@ glyph[21]=没有笔画数据
 导致glyph数据有很多空白.所以需特殊处理,把不连续的数据映射到从0开始都有数据的glyph数组上.
 使用了idDelta来差量计算(某个segment以及之前的segment"跳过"了多少个数据,进行差值计算)
 
+*** 用二分格式里提供的segCount,searchRange,entrySelector,rangeShifter二分查找
 
 为什么使用segCount和对应的searchRange,entrySelector,rangeShift能够进行优化过的 optimized binary search(二分查找)?
 
@@ -160,7 +163,8 @@ searchRange 	64 	(2 * largest power of 2 <=39)---> sizeof(UINT16) * (小于等�
 entrySelector 	5 	log2 (32)                    ---> log2(小于等于39的最大的2的幂)==log2(searchRange>>1)
 rangeShift 	    14 	2 x 39 - 64                  ---> sizeof(UINT16) * ( segCount-小于等于39的最大的2的幂) = 2 * segCount - 2*(小于等于39的最大的2的幂) = 2*segCount - searchRange
 
-也就是说,searchRange里和rangeShift里的乘以2,根本就很混淆视听,它把搜索范围用乘以2的操作转成了字节(byte),根本不直观.
+*也就是说,searchRange里和rangeShift里的乘以2,根本就很混淆视听,它把搜索范围用乘以2的操作转成了字节(byte),根本不直观*
+
 不如把searchRange 和 rangeShift就当成segCount的搜索范围来得直观.
 假设已经从文件里读取出来了segCountX2,searchRange,entrySelector,rangeShift的值:
 二分查找伪代码:
@@ -177,7 +181,7 @@ entrySelector=N,也就是二分查找searchRange所需要的次数
 rangeShift一定是小于searchRange的!因为searchRange小于等于segCount的最大的2^N,如果
 rangeShift >= searchRange,那么searchRange就应该是2^(N+1),矛盾
 |-----------------------segCount--------------------|
-|--rangeShift--|-------searchRange--(2^N)-----------|
+|--rangeShift--|-------searchRange(2^N)-------------|
 
 
 endCode[segCount]数组,一共是segCount个元素:
@@ -212,21 +216,23 @@ startCode是否小于等于character code,如果是则根据idDelta[N]和idRange
  |                              |     |                                         |
  +------------------------------+     +-----------------------------------------+
 
-int search_index = 0;
-//一共是segCount,而索引是0开始的,所以索引是0-segCount-1;
-if codepoint >=endCode[rangeShift-1] then
-  search_index = search_index + rangeShift - 1;
-end
+
+
+******下面,针对int endCode[10] = { 0, 11, 22, 33, 44, 55, 66, 77, 88, 99 };这个数组进行举例.*******
+
+//enCode:{ 0,    11,   22,  33,  44,  55,  66,  77,  88,  99 }
+//index :  0     1     2    3    4    5    6    7    8    9  
+//    |<-rangShift->|<--------------searchRange------------>|
+  
+//segCount = 10;
+//rangeShift=2
+//entrySelector=4;
+//searchRange=8
 
 //rangeShift一定是小于searchRange的!因为searchRange小于等于segCount的最大的2^N,如果
 //rangeShift >= searchRange,那么searchRange就应该是2^(N+1),矛盾
 //所以二分查找一定在entrySelector次后结束
 
-//针对10个元素的endCode数组:
-//索引:         0 1 2 3 4 5 6 7 8 9
-//rangeShift-1=2-1=1
-//entrySelector=4;
-//searchRange=8
 //这里有个特性,也就是关键点,searchRange会历经 8 4 2 1 0(到0就结束)
 //比如 1 2 4 8 16 32 64 128 ... N1 ... N2 这种序列,小于N的任意数,可以由比它小的序列相加来得到!
 //例如,小于32 的 数可以由 1 2 4 8 16来得到:
@@ -245,10 +251,156 @@ end
       1 + 2         + 16 = 19
           2         + 16 = 18
       1             + 16 = 17
+//其实从二进制看就很明了:
+32 = 100000
+16 =  10000
+8  =   1000
+4  =    100
+2  =     10
+1  =      1
 
-while(entrySelector>0) do
+int search_index = 0;
+//一共是segCount,而索引是0开始的,所以索引是0 ~ segCount-1;
+if (codepoint > endCode[rangeShift-1]) //如果rangeShift最后一个元素不满足大于等于codepoint,直接跳到searchRange的第一个,下标是rangeShift
+{
+  search_index = search_index + rangeShift;
+}
+while(entrySelector>0)
+{
+  if(codepint > endCode[search_index + searchRange>>1])
+ {
+   search_index = search_index + searchRange >> 1; 
+ }
+ searchRange = searchRange >> 1;
+ entrySelector--;
+}
+
+#+END_SRC
+
+上面的伪代码最终找出来的(可能)是小于codepoint的最大索引.而不是我们需要的
+大于等于codepoint的最小索引(两者就相差1).
+下面给出寻找大于等于codepoint的最小索引的代码,以及用类似方法实现的二分查找算法
+
+**** 寻找大于等的代码
+
+#+BEGIN_SRC 
+//使用二分法查找endCode数组里大于等于(greater equal)codepoint的索引
+void bsearch_greater_equal(int codepoint)
+{
+	//printf("codepoing:%d\n", codepoint);
+	int endCode[10] = { 0, 11,     22, 33, 44, 55, 66, 77, 88, 99 };
+ 
+	int searchRange = 8;
+	int rangeShift = 2;
+	int entrySelector = 3;
 
 
-end
+	int search_index = 0;
+	if (codepoint > endCode[rangeShift - 1]) //如果rangeShift最后一个元素不满足大于等于codepoint, 直接跳到searchRange的第一个, 下标是rangeShift
+		search_index = search_index + rangeShift;
+	int orignal_search_index = search_index;//相当于数组把数组整体向左移动了rangeShift个位置,orignal_search_index记录起始索引
+	while (entrySelector > 0)
+	{
+		int next_index = search_index + (searchRange >> 1);
+		int next_code = endCode[next_index];
+		if (next_code < codepoint )//最后得到的索引是小于codepoint的最大索引
+		{
+			search_index = next_index;
+		}
+		searchRange = searchRange >> 1;
+		entrySelector--;
+	}
+
+	//  { >=,>=,> , ...> , >, >, > ...}
+	//   /|\
+	//    |
+	//search_index
+	if (search_index == orignal_search_index)//一次都没改变过,说明右边没有比它小的,需要检查它本身和下一个是否满足大于等于它
+	{
+		if (endCode[orignal_search_index] >= codepoint)
+		{
+			search_index = orignal_search_index;
+		}
+		else if (endCode[orignal_search_index + 1] >= codepoint)
+		{
+			search_index = orignal_search_index + 1;
+		}
+	}
+	//  { <,<,< , ...< , >=, >, > ...}
+	//              /|\
+	//               |
+	//          search_index
+	else//经过上面循环之后,search_index是小于(<)unicode_point的左边界,那么大于等于的在后面,需要+1
+	{
+		search_index++;
+	}
+	printf("codepoint : %d find search_index: %d\n", codepoint,search_index);
+}
+#+END_SRC
+
+**** 等于的二分法
+
+#+BEGIN_SRC 
+//使用二分法查找endCode数组里等于(greater equal)codepoint的索引
+void bsearch_equal(int codepoint)
+{
+	//printf("codepoing:%d\n", codepoint);
+	int endCode[10] = { 0, 11, 22, 33, 44, 55, 66, 77, 88, 99 };
+	//                             idx        idx   idx idx'
+
+	int searchRange = 8;
+	int rangeShift = 2;
+	int entrySelector = 3;
+
+
+	int search_index = 0;
+	if (codepoint > endCode[rangeShift - 1]) //如果rangeShift最后一个元素不满足大于等于codepoint, 直接跳到searchRange的第一个, 下标是rangeShift
+		search_index = search_index + rangeShift;
+	int orignal_search_index = search_index;//相当于数组起始元素
+	while (entrySelector > 0)
+	{
+		int next_index = search_index + (searchRange >> 1);
+		int next_code = endCode[next_index];
+		if (next_code < codepoint)
+		{
+			search_index = next_index;
+		}
+		searchRange = searchRange >> 1;
+		entrySelector--;
+	}
+
+	//  { >=,>=,> , ...> , >, >, > ...}
+	//   /|\
+	//    |
+	//search_index
+	if (search_index == orignal_search_index)//一次都没改变过,说明右边没有比它小的,需要检查它本身和下一个是否等于它
+	{
+		if (endCode[orignal_search_index] == codepoint)
+		{
+			search_index = orignal_search_index;
+		}
+		else if (endCode[orignal_search_index + 1] == codepoint)
+		{
+			search_index = orignal_search_index + 1;
+		}
+		else//都不满足等于,说明没有找到
+		{
+			search_index = -1;
+		}
+	}
+	//  { <,<,< , ...< , >=, >, > ...}
+	//              /|\
+	//               |
+	//          search_index
+	else//经过上面循环之后,search_index是小于(<)unicode_point的左边界,那么大于等于的在后面,需要+1
+	{
+		search_index++;
+		if (endCode[search_index] != codepoint)//下一个大于等于的边界不等于,没找到
+		{
+			search_index = -1;
+		}
+	}
+	printf("codepoint : %d find search_index: %d\n", codepoint, search_index);
+}
 
 #+END_SRC
