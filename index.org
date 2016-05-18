@@ -15,12 +15,16 @@
       - ABA问题
       - memory barrier
 
+* 字体渲染(TrueType Font,OpenType Font) [[file:truetypefont.org][View it]]
+
 
 
 [[file:img/number/0.png][hello]]
 [[file:img/number/1.png]]
 [[file:img/1.png]]
 [[img/1.png]]
+
+[[file:oxford3000.txt][牛津3000词汇表]]
 
 
 [[fn:tp1][注脚1]]
