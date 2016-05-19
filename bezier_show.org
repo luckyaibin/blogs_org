@@ -1,19 +1,12 @@
-;; Happy hacking Robin - Emacs loves you!
+#+TITLE: ttf中分割贝塞尔曲线(自己想的,不采用递归方式)
 
-profile
-
-p1 (x1,y1)
-p2 (x2,y2)
-p3 (x3,y3)
-
+针对存在水平切线(切点为X)的p1~p2~p3的贝塞尔曲线,我们从X分割成两个贝塞尔曲线
 #+BEGIN_SRC 
-
-
                           P2
                          *
                                        # on curve
                                        * off curve
-                   __-x--_
+                   __-X--_
                 _--       -_
           P1  _-            -          A non-y-monotonic Bézier arc.
              #               \
@@ -21,16 +14,16 @@ p3 (x3,y3)
                                \              P2.y >= P1.y &&
                                 \  P3         P2.y >= P3.y      (!)
                                  #
-
 #+END_SRC
+三个顶点坐标:
+p1 (x1,y1)
+p2 (x2,y2)
+p3 (x3,y3)
 
+bezier曲线方程如下:
 B(t) = (1-t)^2 * p1 + 2t(1-t) * p2 + t^2 * p3
-
-
-
-
+针对t,求导:
 B'(t) = -2(1-t) * p1 + 2*((1-t) - t)*p2 + 2t * p3
-
 B'(t) = 2(t-1) * p1 + 2(1-2t)*p2 + 2t * p3
 
 令B'(t) = 0,就是曲线的水平或竖直切线:
@@ -47,33 +40,74 @@ t = ----------
 针对水平切线,需要使用p1,p2,p3的y坐标值代入(垂直使用x坐标代入),
 求得t_y = (p1.y - p2.y)/(p1.y - 2*p2.y + p3.y);
 
-然后根据B(t)求出x,y坐标:
-x = (1-t_y)^2 * p1.x + 2t_y(1-t_y) * p2.x + t_y^2 * p3.x
-y = (1-t_y)^2 * p1.y + 2t_y(1-t_y) * p2.y + t_y^2 * p3.y
+然后根据B(t)公式求出切点X的x,y坐标:
+X_x = (1-t_y)^2 * p1.x + 2t_y(1-t_y) * p2.x + t_y^2 * p3.x   (1)
+X_y = (1-t_y)^2 * p1.y + 2t_y(1-t_y) * p2.y + t_y^2 * p3.y   (2)
+
 
 *接下来需要求p1~x,和x~p3这两段的贝塞尔方程(的控制点) c *
+#+BEGIN_SRC 
+                          P2
+                         *
+                                      
+              c                         
+                   __-X--_
+                _--       -_
+          P1  _-            -         
+             #               \
+                              -        
+                               \             
+                                \  P3         
+                                 #
+#+END_SRC
 
- p1,p2,p3构成的方程是:
-B(t)_p1~p2~p3 = (1-t)^2 * p1 + 2t(1-t) * p2 + t^2 * p3  (1)
+其实我们需要理解的bezier曲线的原理:控制点和起始点的连线和他们形成的曲线都是相切的.
+所以 p1-c 平行于 p1-p2,而c-x是水平的,所以c在p1-p2和过x的水平切线的交点上.
 
-对于切点x,x坐标(x,y)已知,且p1~x 弧满足B(t)的方程;
-设控制点为c,
-那么p1~x方程:
-B(t)_p1~c~x = (1-t)^2 * p1 + 2t(1-t) * c + t^2 * x      (2)
-其中x是已知的.
+直线p1-p2: L(t) = p1 + (p2-p1)*t ,t∈[0,1]
+而过X的水平切线时,t=(X_y-p1.y)/(p2.y-p1.y);
+所以c = p1 + (p2-p1)*(X_y-p1.y)/(p2.y-p1.y);
+
+c_x = p1.x + (p2.x - p1.x) * (X_y - p1.y)/(p2.y-p1.y);  (3)
+而因为是水平直线,所以:
+c_y = X_y,不用再计算                                     (4)
+而X_x和X_y已经由上面(1) (2)的公式计算出来了
+
+所以c_x,c_y 可以求出来了.
 
 
-B(t)_p1~p2~p3 = (1-t)^2 * p1 + 2t(1-t) * p2 + t^2 * p3  (1)
-B(t)_p1~c~x   = (1-t)^2 * p1 + 2t(1-t) * c  + t^2 * x   (2)
-这两个方程,经过相同的P1点(这时t=0),都为p1.
 
-且p1点拥有相同的导数:
-B'(t)_p~p2~p3 = 2(t-1) * p1 + 2(1-2t)*p2 + 2t * p3;
-B'(t)_p1~c~x  = 2(t-1) * p1 + 2(1-2t)*c +  2t * x
-把0代入:
-B'(0)_p~p2~p3 = -2*p1 + 2*p2
-B'(0)_p~c~x   = -2*p1 + 2*c
+下面给出lua代码::
+#+BEGIN_SRC lua 
 
+
+  --切线是水平方向:
+local p1 = {x=100,y=250};
+local p2 = {x=250,y=100};
+local p3 = {x=400,y=450};
+
+  --水平方向切线使用 t_y 进行计算
+local t_x = (p1.x - p2.x)/(p1.x - 2*p2.x + p3.x);
+local t_y = (p1.y - p2.y)/(p1.y - 2*p2.y + p3.y);
+  --print('水平或竖直切线处的t_x,t_y',t_x,',',t_y);
+
+local X_x = (1-t_y)^2 *p1.x + 2*t_y*(1-t_y)*p2.x + t_y^2 * p3.x;
+local X_y = (1-t_y)^2 *p1.y + 2*t_y*(1-t_y)*p2.y + t_y^2 * p3.y;
+print(X_x,', ',X_y);
+
+c_x = p1.x + (p2.x - p1.x) * (X_y - p1.y)/(p2.y-p1.y);
+c_y = X_y;
+
+print('c_x:',c_x,' c_y:',c_y);
+
+#+END_SRC
+
+[[file:img/blog_img/bezier_full.png]]
+
+[[file:img/blog_img/bezier_part.png]]
+
+[[file:img/blog_img/bezier_curve.gif]]
+绿色和红色是切线,两个的连接点就是控制点.
 
 
 
