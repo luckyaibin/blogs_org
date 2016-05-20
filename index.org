@@ -16,8 +16,8 @@
       - memory barrier
 
 * 字体渲染(TrueType Font,OpenType Font) [[file:truetypefont.org][View it]]
- ** freetype glyph raster [[file:freetype_raster.txt][查看]]
-
+** freetype glyph raster [[file:freetype_raster.txt][查看]]
+** 分割贝塞尔曲线 [[file:bezier_show.org][View it]]
 
 [[file:img/number/0.png][hello]]
 [[file:img/number/1.png]]

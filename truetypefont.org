@@ -87,7 +87,7 @@ PostScript发明者 Adobe在该领域的垄断地位.采用二次B-样条(Bezier
 
 * 关于cmap里的segCountX2,searchRange,entrySelector,rangeShift和针对binary search的优化
 
-** Format 4 
+** Format 4
  是双字节编码。这种格式用于字体文件中的编码分布与几个连续的区域，在区域之间可能有一些保留的空白。而有一些编码可能并不会与字体中的glyph对应。2字节的压缩编码则使用format6。
 
 Format4的格式:
@@ -221,9 +221,9 @@ startCode是否小于等于character code,如果是则根据idDelta[N]和idRange
 ******下面,针对int endCode[10] = { 0, 11, 22, 33, 44, 55, 66, 77, 88, 99 };这个数组进行举例.*******
 
 //enCode:{ 0,    11,   22,  33,  44,  55,  66,  77,  88,  99 }
-//index :  0     1     2    3    4    5    6    7    8    9  
+//index :  0     1     2    3    4    5    6    7    8    9
 //    |<-rangShift->|<--------------searchRange------------>|
-  
+
 //segCount = 10;
 //rangeShift=2
 //entrySelector=4;
@@ -269,7 +269,7 @@ while(entrySelector>0)
 {
   if(codepint > endCode[search_index + searchRange>>1])
  {
-   search_index = search_index + searchRange >> 1; 
+   search_index = search_index + searchRange >> 1;
  }
  searchRange = searchRange >> 1;
  entrySelector--;
@@ -283,13 +283,13 @@ while(entrySelector>0)
 
 **** 寻找大于等的代码
 
-#+BEGIN_SRC 
+#+BEGIN_SRC
 //使用二分法查找endCode数组里大于等于(greater equal)codepoint的索引
 void bsearch_greater_equal(int codepoint)
 {
 	//printf("codepoing:%d\n", codepoint);
 	int endCode[10] = { 0, 11,     22, 33, 44, 55, 66, 77, 88, 99 };
- 
+
 	int searchRange = 8;
 	int rangeShift = 2;
 	int entrySelector = 3;
@@ -340,7 +340,7 @@ void bsearch_greater_equal(int codepoint)
 
 **** 等于的二分法
 
-#+BEGIN_SRC 
+#+BEGIN_SRC
 //使用二分法查找endCode数组里等于(greater equal)codepoint的索引
 void bsearch_equal(int codepoint)
 {
@@ -404,3 +404,16 @@ void bsearch_equal(int codepoint)
 }
 
 #+END_SRC
+
+
+ #+BEGIN_SRC 
+                    +----------------------------+
+                    |     glyph                  |
+                    |  +---------------------+   |
+                    |  |   contours          |   |
+                    |  |  +----------------+ |   |
+                    |  |  | bezier curves  | |   |
+                    |  |  +----------------+ |   |
+                    |  +---------------------+   |
+                    +----------------------------+
+ #+END_SRC
