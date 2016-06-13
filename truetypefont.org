@@ -413,7 +413,76 @@ void bsearch_equal(int codepoint)
                     |  |   contours          |   |
                     |  |  +----------------+ |   |
                     |  |  | bezier curves  | |   |
+                    |  |  | +-----------+  | |   |
+                    |  |  | | points    |  | |   |
+                    |  |  | +-----------+  | |   |
                     |  |  +----------------+ |   |
                     |  +---------------------+   |
                     +----------------------------+
  #+END_SRC
+
+     
+
+* 光栅化
+
+** 像素,点和设备解析度
+http://wenku.baidu.com/link?url=8rS8NQwUQv-lT-i4U9meaAaD119T4bPWtlJ-fPv_wqHQUSZ84SirZ6_zONwt5ZKbImCz0KM1HaBx6gcgHxaV_gibTfuecuYZm4OJUqPMyMG
+
+*** 像素数的计算 | 
+  像素的物理尺寸通常不是正方,垂直和水平有多种分辨率. 分辨率用dpi( dot per inch,每英寸点数)表示.
+例如一个打印机分辨率为300x600表示每英寸在水平方向300个像素垂直方向有600个像素点.
+  显然,设计字体时候不能让字体坐标采用像素坐标,如果采用就会有问题:
+  (1) 如果水平和垂直方向dpi不一致,本来是方形的字体,就可能被拉伸或压扁.
+  (2) 屏幕像素没有那么精细,这样字体就没那么精细.
+  (3) 缩放是个问题,以什么作为参考来缩放字体到合适大小? |
+  
+  所以ttf坐标值没有采用像素坐标,而是采用自己的一套坐标: x向右,y向上,坐标范围是 -16384 到 16383.
+单独看这个坐标其实没有任何意义,只是定义了笔画上点的相对位置而已.TrueType Font字体里面的坐标都是位于这个范围之内,
+保存在short里.
+
+  那么ttf文件里的x,y坐标一般都是什么值?
+
+  字体设计者在创建字型轮廓的时候,会使用一个假想的正方形轮廓,叫做EM正方形.在一个字体中，每个字符都放置在其空间容器内。
+在传统的金属字模中，这个容器就是每个字符的实际金属块。每个字符的高度是统一的，这样每个字模可以整齐地放进行和块中.
+  
+  字模的高度被称为“em”，起源于大写的字符“M”的宽度；这个字母的比例被做成了方形（因此有了“EM Square”的称呼）。
+  
+  em size是根据字模计算出的点值。因此一个10磅的字体em也是10磅（如下）。
+   
+  在数字化字体中，em是空间的数字化定义总量。在OpenType字体中，UPM或em大小通常是1000单位。在TrueType字体中，
+UPM约定是2的幂，通常是1024或2048。
+
+ 当时用字体来设置样式时，em将会缩放到需要的点值。这意味着对于10磅的字体样式，1000单位在这个实例中将会缩小到10磅。
+
+ 因此如果你的大写的“H”时700单位高，那么它在一个10磅的字体中将会被缩放到7磅高。
+
+
+
+
+!!!! point size doesn’t relate to anything specific in size of printed letters! Yes, given a specific font,
+ the size of 12 point text in print is related to the font data. But 12 point in one font can be bigger or
+ smaller than 12 point in another.
+EM和最后显示出来的像素大小没有任何关系.它只是一个中介,字体坐标<-->EM<-->像素大小
+
+In digital type, the EM does not refer to a “real” box. You better consider the EM as a yardstick – an abstract 
+letter-height yardstick which establishes a link between micro and macro level, between font-internal unit system and
+ font-external unit system: The font-internal unit system is defined via UPM, i.e. as the number of units per EM. It is
+ the letter-design grid or resolution. The font-external unit system may be typographic point, millimeter, pixel, etc. 
+And this abstract EM serves to project the font-internal unit system onto the font-external unit system.
+
+An example. You have a font with 2048 units per EM, internally, which is to be projected on 12 pt type size, externally. 
+So 12 pts = 2048 M-units or 1 M-unit = 12/2048 pt.
+
+So to image the font at 12 point, one scales the abstract EM to equal 12 points.
+
+litigation 起诉
+contesting 竞争
+salvo      礼炮;奇袭
+swash      v.泼散(水)；奔流；虚夸；虚张声势 n.（浪头拍岸后的）冲激
+typographic adj.印刷(术)上的
+unobtrusive adj.不张扬的；不招摇的
+scammer na.【计】主页
+disclaimer n.免责声明；弃权声明（书）
+legislation  n.立法；法律；法规；制订法律
+yardstick
+legitimate
