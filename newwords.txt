@@ -1,0 +1,101 @@
+;; Happy hacking Robin - Emacs loves you!
+
+advent 出现
+deformation 变形
+symmetry 对称
+cubic 【数】三次曲线；三次方程式
+quadratic 二次方程式；二次项
+conics n.圆锥曲线论
+proportion 比例
+phantom n.幽灵；幻象；鬼；鬼魂
+amplify v.放大；充实（故事、事情、陈述等）
+delicate * adj.精致的，微妙的，脆弱的，熟练的，柔和的
+hull * n.船体；船身
+assimilate * v.吸收；消化；透彻理解；（使）同化
+resultant * n.结果；合成[运动]；组合；后果
+proportional * adj.相称的；成比例的；均衡的
+displacement * n.移位；取代；排水量；替代
+phase * n.阶段；时期；月相；（月亮的）盈亏
+sufficient * adj.足够的；充足的
+facility * n.设施；设备；天赋；（机器等的）特别装置
+optimal * adj.最适宜的；最理想的；最好的
+optical adj.视力的；视觉的；光学的；有助于视力的
+curvilinear * adj.曲线的；由曲线组成的
+discrete * adj.分离的；互不相连的；各别的
+snapping * v.突然折断；猛地咬住；猛扑；吆喝着说
+liable * adj.（法律上）负有偿付责任；可能（做某事）；可能受…影响
+oblique * v.倾斜；【军】(成45度)斜进；斜行进
+disturb * v.打扰；干扰；弄乱；妨碍
+disrupt * v.扰乱；打乱；使中断 * adj.混乱的；瓦解的；中断的
+
+artifact * n.人工制品；【生】(组织结构的)人为现象
+artefact * n.人工制品
+
+dropout * n.辍学者；退学者；拒绝传统社会的人
+overhang * v.悬垂；悬挂；突出于某物之上 * n.悬垂物；外伸量；突出量；过剩（物）
+extremity * n.末端；极端；极限；极度
+philosophy * n.哲学；人生哲学；哲学体系；思想体系
+
+
+conversion * n.转换；转化；转变；皈依
+conversation * n.（非正式）交谈
+converse * v.交谈；转换；〔书面语〕谈话(人与计算机)谈话
+         * n.反之；【逻辑学】倒转命题；逆叙；【数学】逆
+         * adj.倒转的
+reverse  * n.反面；背面；倒退；相反的情况（或事物）
+         * v.颠倒；倒车；撤销；彻底转变
+         * adj.相反的；反面的；反向的；背面的
+inverse * n.反面；相反的事物
+        * adj.反向的
+        * v.使成反面
+verse   * n.诗；韵文；诗节；歌曲的段落
+        * v.作诗；用诗表现；(把…)写成诗
+
+symptoms * n.症状；征兆；【医】症状
+deactivate * v.使（仪器等）停止工作；使（化学过程）灭活化（或减活化、钝化）
+
+deviation
+inflection * n.（尤指词尾的）屈折变化；语调的抑扬变化
+curvature * n.曲率；弯曲；曲度
+posing
+
+
+
+useful linkages:
+
+https://freddie.witherden.org/pages/font-rasterisation/
+
+https://www.freetype.org/autohinting/hinter.html
+
+
+* edges are the basis of grid-alignement and point interpolation in the FreeType Auto-Hinter.
+
+        a  closed curve
+             |
+             v
+outline -> contour -> edge -> segments -> points
+                                 |
+                                 v
+                                stem
+1. 划分segment
+segment:
+是近似对齐于某个坐标轴的一系列点.允许的和直线的最大偏差是1/12(4.7°)--这是一个启发值.
+至少有两个点(除非...)
+每个segment有某个维度的一个主方向的坐标和另外一个维度的坐标,确定她的极值(extrema)--min_coord或者max_coord
+
+2. 把segments划分成边(edges)
+edge是主维度上一个单独位置上一致的一个或多个segment.
+
+
+
+auto-hinter 先尝试grid fit edge,然后对齐edge上的segments,除非它检测到它们从衬线那来的.
+
+segment需要被连接(linked to)到其他上面,为了检测(detect)stem.
+
+abcdefghijklmnopqrstuvwxyz
+ ABCDEFGHJIKLMNOPQRSTUVWXYZ
+*ABCDEFGHJIKLMNOPQRSTUVWXYZ*
+
+
+
+
