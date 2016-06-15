@@ -1,4 +1,6 @@
-;; Happy hacking Robin - Emacs loves you!
+abcdefghijklmnopqrstuvwxyz
+ABCDEFGHJIKLMNOPQRSTUVWXYZ
+
 
 advent 出现
 deformation 变形
@@ -54,47 +56,12 @@ verse   * n.诗；韵文；诗节；歌曲的段落
 symptoms * n.症状；征兆；【医】症状
 deactivate * v.使（仪器等）停止工作；使（化学过程）灭活化（或减活化、钝化）
 
-deviation
+deviation * n.偏差；偏离；背离；违背
 inflection * n.（尤指词尾的）屈折变化；语调的抑扬变化
 curvature * n.曲率；弯曲；曲度
-posing
+vocabulary * n.词汇量；（某一语言的）词汇；（某学科中所使用的）词汇
 
 
-
-useful linkages:
-
-https://freddie.witherden.org/pages/font-rasterisation/
-
-https://www.freetype.org/autohinting/hinter.html
-
-
-* edges are the basis of grid-alignement and point interpolation in the FreeType Auto-Hinter.
-
-        a  closed curve
-             |
-             v
-outline -> contour -> edge -> segments -> points
-                                 |
-                                 v
-                                stem
-1. 划分segment
-segment:
-是近似对齐于某个坐标轴的一系列点.允许的和直线的最大偏差是1/12(4.7°)--这是一个启发值.
-至少有两个点(除非...)
-每个segment有某个维度的一个主方向的坐标和另外一个维度的坐标,确定她的极值(extrema)--min_coord或者max_coord
-
-2. 把segments划分成边(edges)
-edge是主维度上一个单独位置上一致的一个或多个segment.
-
-
-
-auto-hinter 先尝试grid fit edge,然后对齐edge上的segments,除非它检测到它们从衬线那来的.
-
-segment需要被连接(linked to)到其他上面,为了检测(detect)stem.
-
-abcdefghijklmnopqrstuvwxyz
- ABCDEFGHJIKLMNOPQRSTUVWXYZ
-*ABCDEFGHJIKLMNOPQRSTUVWXYZ*
 
 
 

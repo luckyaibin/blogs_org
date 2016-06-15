@@ -19,10 +19,15 @@
 ** freetype glyph raster [[file:freetype_raster.txt][查看]]
 ** 分割贝塞尔曲线 [[file:bezier_show.org][View it]]
 
+
+
 [[file:img/number/0.png][hello]]
 [[file:img/number/1.png]]
 [[file:img/1.png]]
 [[img/1.png]]
+
+
+个人生词本 [[file:newwords.txt][查看生词本]]
 
 [[file:oxford3000.txt][牛津3000词汇表]]
 
